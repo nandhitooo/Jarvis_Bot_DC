@@ -73,7 +73,7 @@ class Jarvis(commands.Bot):
         embed.add_field(
             name="🎵 Musik",
             value=(
-                "`!jarvis play <judul/link>` — Putar dari YT, Spotify, dll.\n"
+                "`!jarvis play <judul/link>` — Putar musik.\n"
                 "`!jarvis join` — Masuk ke voice channel kamu\n"
                 "`!jarvis stop` — Stop dan keluar dari voice\n"
                 "`!jarvis skip` — Lewati lagu sekarang\n"
@@ -91,8 +91,8 @@ class Jarvis(commands.Bot):
         embed.add_field(
             name="🤖 AI & Asisten",
             value=(
-                "`!jarvis gmn <pertanyaan>` — Tanya ke **Google Gemini** AI\n"
-                "`!jarvis ds <pertanyaan>` — Tanya ke **DeepSeek** AI"
+                "`!jarvis ask <pertanyaan>` — Tanya ke **AI**\n"
+                "`!jarvis model` — Lihat daftar model AI yang tersedia\n"
             ),
             inline=False,
         )
@@ -217,4 +217,3 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         print("[Jarvis] Bot dihentikan oleh user.")
-        
