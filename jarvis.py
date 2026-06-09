@@ -63,7 +63,7 @@ class Jarvis(commands.Bot):
     async def _send_help_menu(self, ctx: commands.Context):
         embed = discord.Embed(
             title="🤖 Jarvis — Command Menu",
-            description="Siap melayani, Boss! Berikut perintah yang tersedia:",
+            description="Ready Boss! Berikut perintah yang tersedia:",
             color=0x00E5FF,
         )
         if self.user:
@@ -83,7 +83,7 @@ class Jarvis(commands.Bot):
                 "`!jarvis ph` — Tampilkan playing history\n"
                 "`!jarvis volume <0-100>` — Atur volume\n"
                 "`!jarvis clear` — Hapus semua antrian\n"
-                "`!jarvis remove <nomor>` — Hapus lagu dari antrian\n"
+                "`!jarvis remove <nomor antrian>` — Hapus lagu dari antrian\n"
             ),
             inline=False,
         )
@@ -91,7 +91,10 @@ class Jarvis(commands.Bot):
         embed.add_field(
             name="🤖 AI & Asisten",
             value=(
-                "`!jarvis ask <pertanyaan>` — Tanya ke **AI**\n"
+                "`!jarvis ask <pertanyaan>` — Tanya ke AI\n"
+                "`!jarvis summarize <pdf>` — Ringkas file pdf\n"
+                "`!jarvis search <query>` — Cari di web\n"
+                "`!jarvis image <deskripsi>` — Buat gambar AI\n"
                 "`!jarvis model` — Lihat daftar model AI yang tersedia\n"
             ),
             inline=False,

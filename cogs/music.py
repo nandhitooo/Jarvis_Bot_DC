@@ -96,11 +96,17 @@ class Music(commands.Cog):
         self.disconnect_tasks: dict[int, asyncio.Task] = {}
         # guild_id -> deque[str]
         self.playing_histories: dict[int, deque[str]] = {}
+        # guild_id -> float (0.0 – 1.0), default 0.5
+        self.guild_volumes: dict[int, float] = {}
 
     def get_history(self, guild_id: int) -> deque[str]:
         if guild_id not in self.playing_histories:
             self.playing_histories[guild_id] = deque(maxlen=100)
         return self.playing_histories[guild_id]
+
+    def get_volume(self, guild_id: int) -> float:
+        """Return saved volume for a guild (default 0.5)."""
+        return self.guild_volumes.get(guild_id, 0.5)
 
     # ------------------------------------------------------------------ #
     #  Helpers                                                             #
@@ -292,6 +298,7 @@ class Music(commands.Cog):
                     first = entries[0]
                     first_url = first.get('webpage_url') or first.get('url') or f"https://www.youtube.com/watch?v={first.get('id')}"
                     player = await YTDLSource.from_url(first_url, loop=self.bot.loop, stream=True, requester=entry.requester)
+                    player.volume = self.get_volume(ctx.guild.id)
                     vc.play(player, after=lambda e: self._after_play(ctx, e))
 
                     # Update playing history
@@ -301,6 +308,7 @@ class Music(commands.Cog):
                     await ctx.send(embed=embed)
                 else:
                     player = result
+                    player.volume = self.get_volume(ctx.guild.id)
                     vc.play(player, after=lambda e: self._after_play(ctx, e))
 
                     # Update playing history
@@ -425,6 +433,7 @@ class Music(commands.Cog):
 
             try:
                 player = await YTDLSource.from_url(first_url, loop=self.bot.loop, stream=True, requester=ctx.author)
+                player.volume = self.get_volume(ctx.guild.id)
                 vc.play(player, after=lambda e: self._after_play(ctx, e))
                 
                 # Update playing history
@@ -463,6 +472,7 @@ class Music(commands.Cog):
                 embed = self.get_added_to_queue_embed(player, ctx.author, len(queue))
                 await ctx.send(embed=embed)
             else:
+                player.volume = self.get_volume(ctx.guild.id)
                 vc.play(player, after=lambda e: self._after_play(ctx, e))
                 
                 # Update playing history
@@ -475,11 +485,11 @@ class Music(commands.Cog):
     async def pause(self, ctx: commands.Context):
         if ctx.voice_client and ctx.voice_client.is_playing():
             ctx.voice_client.pause()
-            pos_text = ""
-            if hasattr(ctx.voice_client, 'position'):
-                pos_text = f" dijeda"
+            title = ""
+            if hasattr(ctx.voice_client.source, 'title'):
+                title = f" — **{ctx.voice_client.source.title}**"
             embed = discord.Embed(
-                description=f"⏸️ **Playback dijeda** di menit **{ctx.voice_client.position // 60}:{ctx.voice_client.position % 60:02d}** {pos_text}.",
+                description=f"⏸️ **Playback dijeda.**{title}",
                 color=0xf1c40f
             )
             await ctx.send(embed=embed)
@@ -494,11 +504,11 @@ class Music(commands.Cog):
     async def resume(self, ctx: commands.Context):
         if ctx.voice_client and ctx.voice_client.is_paused():
             ctx.voice_client.resume()
-            pos_text = ""
-            if hasattr(ctx.voice_client, 'position'):
-                pos_text = f" dilanjutkan"
+            title = ""
+            if hasattr(ctx.voice_client.source, 'title'):
+                title = f" — **{ctx.voice_client.source.title}**"
             embed = discord.Embed(
-                description=f"▶️ **Playback dilanjutkan** di menit **{ctx.voice_client.position // 60}:{ctx.voice_client.position % 60:02d}** {pos_text}.",
+                description=f"▶️ **Playback dilanjutkan.**{title}",
                 color=0x2ecc71
             )
             await ctx.send(embed=embed)
@@ -618,20 +628,19 @@ class Music(commands.Cog):
                 color=0xff3333
             )
             return await ctx.send(embed=embed)
+
+        # Simpan volume untuk guild ini agar berlaku ke semua lagu berikutnya
+        self.guild_volumes[ctx.guild.id] = vol / 100
+
         vc = ctx.voice_client
         if vc and hasattr(vc.source, 'volume'):
             vc.source.volume = vol / 100
-            embed = discord.Embed(
-                description=f"🔊 **Volume diatur ke {vol}%**",
-                color=0x00E5FF
-            )
-            await ctx.send(embed=embed)
-        else:
-            embed = discord.Embed(
-                description="❌ Tidak ada audio yang sedang diputar.",
-                color=0xff3333
-            )
-            await ctx.send(embed=embed)
+
+        embed = discord.Embed(
+            description=f"🔊 **Volume diatur ke {vol}%** — berlaku untuk semua lagu.",
+            color=0x00E5FF
+        )
+        await ctx.send(embed=embed)
 
     @commands.command(name='clear', help='Hapus semua lagu dalam antrian')
     async def clear(self, ctx: commands.Context):
@@ -663,3 +672,4 @@ class Music(commands.Cog):
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Music(bot))
+    

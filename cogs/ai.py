@@ -1,16 +1,14 @@
 import os
+import io
+import asyncio
+import aiohttp
 import discord
 from discord.ext import commands
 from datetime import datetime
 from openai import AsyncOpenAI
 
 
-# Model fallback: dari yang paling capable ke paling ringan
-GROQ_MODELS = [
-    ("llama-3.3-70b-versatile",  "Llama 3.3 70B"),
-    ("llama-3.1-8b-instant",     "Llama 3.1 8B"),
-    ("gemma2-9b-it",             "Gemma 2 9B"),
-]
+MAX_PDF_CHARS = 12000  # ~3000 token, aman untuk semua model
 
 
 class AI(commands.Cog):
@@ -30,6 +28,17 @@ class AI(commands.Cog):
         else:
             print("[AI] ⚠️  GROQ_API_KEY not found in .env")
 
+        # Load models from .env
+        self.models = []
+        for i in range(1, 4):
+            mid = os.getenv(f"GROQ_MODEL_{i}")
+            label = os.getenv(f"GROQ_MODEL_LABEL_{i}")
+            if mid and label:
+                self.models.append((mid, label))
+
+        self.custom_image_url = os.getenv("CUSTOM_IMAGE_API_URL")
+        self.custom_image_key = os.getenv("CUSTOM_IMAGE_API_KEY")
+
     # ────────────────────────────────────────────────────────────
     # Helper: system prompt + timestamp
     # ────────────────────────────────────────────────────────────
@@ -39,8 +48,6 @@ class AI(commands.Cog):
             "You are Jarvis, a polite, highly advanced butler AI. "
             f"The current date and time is {now_str}. "
             "Use this date/time context to answer any question about 'now', 'today', or the current year accurately. "
-            "If asked about the current year, the answer is 2026. "
-            "Jika ditanya tahun berapa sekarang, jawabannya adalah 2026. "
             "Support the language the user is speaking (Indonesian/English) politely."
         )
         return now_str, sys_instruction
@@ -71,13 +78,147 @@ class AI(commands.Cog):
                 ))
 
     # ────────────────────────────────────────────────────────────
+    # Command: !jarvis summarize
+    # ────────────────────────────────────────────────────────────
+    @commands.command(name='summarize', aliases=['sum', 'ringkas'], help='Ringkas isi file PDF (attach atau URL)')
+    async def summarize(self, ctx: commands.Context, *, pdf_url: str = None):
+        if not self.available:
+            return await ctx.send(embed=discord.Embed(
+                description="❌ **GROQ_API_KEY** tidak ditemukan di file `.env`.",
+                color=0xFF3333
+            ))
+
+        attachment = None
+        if ctx.message.attachments:
+            attachment = ctx.message.attachments[0]
+            if not attachment.filename.lower().endswith('.pdf'):
+                return await ctx.send(embed=discord.Embed(
+                    description="❌ File yang dilampirkan bukan PDF.",
+                    color=0xFF3333
+                ))
+            url = attachment.url
+        elif pdf_url:
+            url = pdf_url.strip()
+            if not url.lower().endswith('.pdf') and 'pdf' not in url.lower():
+                return await ctx.send(embed=discord.Embed(
+                    description="❌ URL tidak terlihat seperti file PDF. Pastikan URL mengarah ke file `.pdf`.",
+                    color=0xFF3333
+                ))
+        else:
+            return await ctx.send(embed=discord.Embed(
+                title="📄 Cara pakai summarize",
+                description=(
+                    "**Opsi 1 — Attach file:**\n"
+                    "Lampirkan file PDF ke pesan, lalu ketik:\n"
+                    "`!jarvis summarize`\n\n"
+                    "**Opsi 2 — URL:**\n"
+                    "`!jarvis summarize https://contoh.com/dokumen.pdf`"
+                ),
+                color=0x00E5FF
+            ))
+
+        status_msg = await ctx.send(embed=discord.Embed(
+            description="📥 Mengunduh dan membaca PDF...",
+            color=0xf1c40f
+        ))
+
+        async with ctx.typing():
+            try:
+                pdf_bytes = await self._download_pdf(url)
+                await status_msg.edit(embed=discord.Embed(
+                    description="🔍 Mengekstrak teks dari PDF...",
+                    color=0xf1c40f
+                ))
+                text = self._extract_pdf_text(pdf_bytes)
+
+                if not text or len(text.strip()) < 50:
+                    return await status_msg.edit(embed=discord.Embed(
+                        description="❌ Gagal mengekstrak teks. PDF mungkin berupa scan/gambar (bukan teks).",
+                        color=0xFF3333
+                    ))
+
+                truncated = False
+                if len(text) > MAX_PDF_CHARS:
+                    text = text[:MAX_PDF_CHARS]
+                    truncated = True
+
+                await status_msg.edit(embed=discord.Embed(
+                    description="🤖 Merangkum dengan AI...",
+                    color=0xf1c40f
+                ))
+
+                _, sys_instruction = self._build_sys()
+                prompt = (
+                    "Tolong buat ringkasan lengkap dari dokumen PDF berikut ini.\n"
+                    "Sertakan: poin-poin utama, kesimpulan, dan informasi penting lainnya.\n"
+                    "Gunakan bahasa yang sama dengan dokumen tersebut.\n\n"
+                    f"--- ISI DOKUMEN ---\n{text}\n--- AKHIR DOKUMEN ---"
+                )
+
+                answer, used_model = await self._query(sys_instruction, "", prompt, max_tokens=1500)
+                await status_msg.delete()
+
+                filename = attachment.filename if attachment else url.split('/')[-1]
+                header = f"📄 **Ringkasan: {filename}**"
+                if truncated:
+                    header += "\n⚠️ *Dokumen terpotong (terlalu panjang), ringkasan berdasarkan bagian awal.*"
+
+                await self._send_response(ctx, f"{header}\n\n{answer}", used_model)
+
+            except ValueError as e:
+                await status_msg.edit(embed=discord.Embed(
+                    description=f"❌ {e}",
+                    color=0xFF3333
+                ))
+            except Exception as e:
+                print(f"[AI] Summarize error: {e}")
+                await status_msg.edit(embed=discord.Embed(
+                    description=self._friendly_error(str(e)),
+                    color=0xFF3333
+                ))
+
+    # ────────────────────────────────────────────────────────────
+    # Command: !jarvis search
+    # ────────────────────────────────────────────────────────────
+    @commands.command(name='search', aliases=['web', 'cari'], help='Cari informasi di web (via Groq)')
+    async def search(self, ctx: commands.Context, *, query: str):
+        if not self.available:
+            return await ctx.send(embed=discord.Embed(
+                description="❌ **GROQ_API_KEY** tidak ditemukan di file `.env`.",
+                color=0xFF3333
+            ))
+
+        async with ctx.typing():
+            try:
+                now_str, sys_instruction = self._build_sys()
+                search_prompt = (
+                    "Kamu adalah asisten pencarian web yang sangat cerdas. "
+                    "Berikan jawaban singkat dan relevan untuk pertanyaan berikut, berdasarkan pengetahuan umum dan data yang tersedia hingga tahun 2026. "
+                    "Jika kamu tidak tahu jawabannya, katakan dengan jujur bahwa kamu tidak tahu."
+                )
+                enriched_query = f"{query}\n\n[Context: {now_str}]"
+                answer, used_model = await self._query(sys_instruction + "\n" + search_prompt, now_str, enriched_query)
+                if not answer or not answer.strip():
+                    answer = "Maaf, saya tidak bisa menemukan informasi yang relevan untuk pertanyaan itu."
+                await self._send_response(ctx, answer, used_model)
+            except Exception as e:
+                print(f"[AI] Search error: {e}")
+                await ctx.send(embed=discord.Embed(
+                    description=self._friendly_error(str(e)),
+                    color=0xFF3333
+                ))
+
+    # ────────────────────────────────────────────────────────────
     # Command: !jarvis model
     # ────────────────────────────────────────────────────────────
     @commands.command(name='model', aliases=['models'], help='Lihat daftar model AI yang tersedia')
     async def list_models(self, ctx: commands.Context):
+        if not self.models:
+            return await ctx.send("Tidak ada model AI yang terkonfigurasi di `.env`.")
+            
         lines = "\n".join(
             f"`{i+1}.` {label} — `{mid}`"
-            for i, (mid, label) in enumerate(GROQ_MODELS)
+            for i, (mid, label) in enumerate(self.models)
         )
         embed = discord.Embed(
             title="🧠 Model AI (Groq)",
@@ -91,13 +232,115 @@ class AI(commands.Cog):
         await ctx.send(embed=embed)
 
     # ────────────────────────────────────────────────────────────
+    # Command: !jarvis image
+    # ────────────────────────────────────────────────────────────
+    @commands.command(name='image', aliases=['img', 'gambar'], help='Buat gambar AI dari deskripsi teks')
+    async def image(self, ctx: commands.Context, *, prompt: str):
+        if not self.custom_image_url or not self.custom_image_key:
+            return await ctx.send(embed=discord.Embed(
+                description="❌ **Image API** tidak terkonfigurasi di file `.env`.",
+                color=0xFF3333
+            ))
+
+        status_msg = await ctx.send(embed=discord.Embed(
+            description=f"🎨 Membuat gambar untuk: **{prompt}**\n⏳ Harap tunggu sebentar...",
+            color=0xf1c40f
+        ))
+
+        async with ctx.typing():
+            try:
+                image_bytes = await self._generate_image_custom(prompt)
+                
+                await status_msg.delete()
+                file = discord.File(fp=io.BytesIO(image_bytes), filename="jarvis_image.png")
+                embed = discord.Embed(
+                    title="🖼️ Gambar Dibuat!",
+                    description=f"**Prompt:** {prompt}",
+                    color=0x00E5FF
+                )
+                embed.set_image(url="attachment://jarvis_image.png")
+                embed.set_footer(
+                    text=f"Powered by Jarvis Image API • Diminta oleh {ctx.author.name}",
+                    icon_url=ctx.author.display_avatar.url
+                )
+                await ctx.send(file=file, embed=embed)
+                
+            except Exception as e:
+                print(f"[AI] Image generation failed: {e}")
+                await status_msg.edit(embed=discord.Embed(
+                    description=f"⚠️ Gagal membuat gambar: `{e}`",
+                    color=0xFF3333
+                ))
+
+    # ────────────────────────────────────────────────────────────
+    # Internal: Custom Image API (from image_gen.js)
+    # ────────────────────────────────────────────────────────────
+    async def _generate_image_custom(self, prompt: str) -> bytes:
+        headers = {
+            "Authorization": f"Bearer {self.custom_image_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {"prompt": prompt}
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                self.custom_image_url,
+                headers=headers,
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=60),
+            ) as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    raise Exception(f"Image API HTTP {resp.status}: {text[:150]}")
+                return await resp.read()
+
+    # ────────────────────────────────────────────────────────────
+    # Internal: download PDF dari URL
+    # ────────────────────────────────────────────────────────────
+    async def _download_pdf(self, url: str) -> bytes:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                if resp.status != 200:
+                    raise ValueError(f"Gagal mengunduh PDF (HTTP {resp.status}).")
+                content_type = resp.headers.get("Content-Type", "")
+                if "pdf" not in content_type and not url.lower().endswith(".pdf"):
+                    raise ValueError("URL bukan file PDF yang valid.")
+                data = await resp.read()
+                if len(data) > 20 * 1024 * 1024:  # 20MB limit
+                    raise ValueError("File PDF terlalu besar (maks 20MB).")
+                return data
+
+    # ────────────────────────────────────────────────────────────
+    # Internal: extract teks dari bytes PDF menggunakan pypdf
+    # ────────────────────────────────────────────────────────────
+    def _extract_pdf_text(self, pdf_bytes: bytes) -> str:
+        try:
+            import pypdf
+            reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
+            pages  = []
+            for page in reader.pages:
+                text = page.extract_text()
+                if text:
+                    pages.append(text.strip())
+            return "\n\n".join(pages)
+        except ImportError:
+            raise ValueError(
+                "Package `pypdf` belum terinstall.\n"
+                "Jalankan: `pip install pypdf`"
+            )
+        except Exception as e:
+            raise ValueError(f"Gagal membaca PDF: {e}")
+
+    # ────────────────────────────────────────────────────────────
     # Internal: query Groq dengan fallback antar model
     # ────────────────────────────────────────────────────────────
-    async def _query(self, sys_instruction: str, now_str: str, question: str):
-        enriched   = f"[Context: {now_str}]\n{question}"
+    async def _query(self, sys_instruction: str, now_str: str, question: str, max_tokens: int = 1000):
+        enriched   = f"[Context: {now_str}]\n{question}" if now_str else question
         last_error = None
 
-        for model_id, model_label in GROQ_MODELS:
+        if not self.models:
+            raise Exception("Tidak ada model AI yang terkonfigurasi.")
+
+        for model_id, model_label in self.models:
             try:
                 print(f"[AI] Trying model: {model_id}")
                 response = await self.client.chat.completions.create(
@@ -106,7 +349,7 @@ class AI(commands.Cog):
                         {"role": "system", "content": sys_instruction},
                         {"role": "user",   "content": enriched},
                     ],
-                    max_tokens=1000,
+                    max_tokens=max_tokens,
                     temperature=0.7,
                 )
                 answer = response.choices[0].message.content
@@ -116,7 +359,6 @@ class AI(commands.Cog):
             except Exception as e:
                 err_str = str(e)
                 print(f"[AI] {model_id} failed: {err_str}")
-                # Jangan fallback kalau masalah auth — semua model pasti gagal
                 if "401" in err_str or "invalid_api_key" in err_str.lower():
                     raise Exception("🔑 **API Key Groq tidak valid.** Periksa kembali file `.env`.")
                 last_error = e
