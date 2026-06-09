@@ -64,9 +64,12 @@ class Jarvis(commands.Bot):
         embed = discord.Embed(
             title="🤖 Jarvis — Command Menu",
             description="Siap melayani, Boss! Berikut perintah yang tersedia:",
-            color=discord.Color.blue(),
+            color=0x00E5FF,
         )
- 
+        if self.user:
+            embed.set_author(name="Jarvis Bot", icon_url=self.user.display_avatar.url)
+            embed.set_thumbnail(url=self.user.display_avatar.url)
+
         embed.add_field(
             name="🎵 Musik",
             value=(
@@ -77,13 +80,23 @@ class Jarvis(commands.Bot):
                 "`!jarvis pause` / `!jarvis resume` — Kontrol playback\n"
                 "`!jarvis queue` — Lihat antrian lagu\n"
                 "`!jarvis np` — Lagu yang sedang diputar\n"
+                "`!jarvis ph` — Tampilkan playing history\n"
                 "`!jarvis volume <0-100>` — Atur volume\n"
                 "`!jarvis clear` — Hapus semua antrian\n"
-                "`!jarvis remove <nomor>` — Hapus lagu dari antrian"
+                "`!jarvis remove <nomor>` — Hapus lagu dari antrian\n"
             ),
             inline=False,
         )
- 
+
+        embed.add_field(
+            name="🤖 AI & Asisten",
+            value=(
+                "`!jarvis gmn <pertanyaan>` — Tanya ke **Google Gemini** AI\n"
+                "`!jarvis ds <pertanyaan>` — Tanya ke **DeepSeek** AI"
+            ),
+            inline=False,
+        )
+
         embed.add_field(
             name="🛠️ Utilitas",
             value=(
@@ -92,24 +105,39 @@ class Jarvis(commands.Bot):
             ),
             inline=False,
         )
- 
-        embed.set_footer(text="Still in development... Stay tuned for more features!")
+
+        embed.set_footer(
+            text=f"Still in development... • Diminta oleh {ctx.author.name}",
+            icon_url=ctx.author.display_avatar.url
+        )
         await ctx.send(embed=embed)
- 
+
     async def on_command_error(self, ctx: commands.Context, error):
         if isinstance(error, commands.CommandNotFound):
             return  # Abaikan perintah yang tidak dikenal
         if isinstance(error, commands.MissingRequiredArgument):
-            await ctx.send(f"❌ Argumen kurang: `{error.param.name}`. Ketik `!jarvis` untuk melihat bantuan.")
+            embed = discord.Embed(
+                description=f"❌ **Argumen kurang:** `{error.param.name}`\nKetik `!jarvis` untuk melihat bantuan.",
+                color=0xff3333
+            )
+            await ctx.send(embed=embed)
             return
         if isinstance(error, commands.BadArgument):
-            await ctx.send(f"❌ Argumen tidak valid. Ketik `!jarvis` untuk melihat bantuan.")
+            embed = discord.Embed(
+                description="❌ **Argumen tidak valid.**\nKetik `!jarvis` untuk melihat bantuan.",
+                color=0xff3333
+            )
+            await ctx.send(embed=embed)
             return
- 
+
         # Log error teknis tanpa expose detail ke user
         print(f"[Error] Command '{ctx.command}': {error}")
-        await ctx.send("⚠️ Terjadi kesalahan. Silakan coba lagi.")
- 
+        embed = discord.Embed(
+            description="⚠️ **Terjadi kesalahan.** Silakan coba lagi.",
+            color=0xf1c40f
+        )
+        await ctx.send(embed=embed)
+
     async def close(self):
         """Graceful shutdown: disconnect semua voice client."""
         print("[Jarvis] Mematikan bot...")
@@ -119,21 +147,55 @@ class Jarvis(commands.Bot):
             except Exception:
                 pass
         await super().close()
- 
- 
+
+
 bot = Jarvis()
- 
- 
+
+
 @bot.command(name='cogs', help='Tampilkan cogs yang sedang aktif')
 async def list_cogs(ctx: commands.Context):
     loaded = ', '.join(bot.cogs.keys()) if bot.cogs else 'Tidak ada'
-    await ctx.send(f"📦 Cogs aktif: **{loaded}**")
- 
- 
+    embed = discord.Embed(
+        title="📦 Active Modules (Cogs)",
+        description=f"**{loaded}**",
+        color=0x00E5FF
+    )
+    embed.set_footer(text=f"Diminta oleh {ctx.author.name}", icon_url=ctx.author.display_avatar.url)
+    await ctx.send(embed=embed)
+
+
 @bot.command(name='ping', help='Cek latensi bot')
 async def ping(ctx: commands.Context):
-    latency = round(bot.latency * 1000)
-    await ctx.send(f"🏓 Pong! Latensi: **{latency}ms**")
+    import time
+
+    ws_latency = round(bot.latency * 1000)
+
+    # Ukur round-trip: waktu dari kirim pesan sampai Discord konfirmasi
+    start = time.perf_counter()
+    msg = await ctx.send("🏓 Mengukur...")
+    roundtrip = round((time.perf_counter() - start) * 1000)
+
+    # Warna berdasarkan round-trip
+    if roundtrip < 100:
+        color = 0x2ecc71   # hijau
+        status = "🟢 Sangat baik"
+    elif roundtrip < 200:
+        color = 0xf1c40f   # kuning
+        status = "🟡 Baik"
+    elif roundtrip < 400:
+        color = 0xe67e22   # oranye
+        status = "🟠 Sedang"
+    else:
+        color = 0xe74c3c   # merah
+        status = "🔴 Lambat"
+
+    embed = discord.Embed(title="🏓 Pong!", color=color)
+    embed.add_field(name="📡 WebSocket",  value=f"`{ws_latency}ms`",  inline=True)
+    embed.add_field(name="↩️ Round-trip", value=f"`{roundtrip}ms`",   inline=True)
+    embed.add_field(name="📊 Status",     value=status,               inline=True)
+    embed.set_footer(text=f"Diminta oleh {ctx.author.name}", icon_url=ctx.author.display_avatar.url)
+
+    await msg.edit(content=None, embed=embed)
  
  
 async def main():
@@ -155,3 +217,4 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         print("[Jarvis] Bot dihentikan oleh user.")
+        

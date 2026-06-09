@@ -33,24 +33,26 @@ ytdl = yt_dlp.YoutubeDL(ytdl_format_options)
 
 class QueueEntry:
     """Represents a single item in the queue with both URL and display title."""
-    def __init__(self, url: str, title: str = None):
+    def __init__(self, url: str, title: str = None, requester: discord.Member = None):
         self.url = url
         self.title = title or url
+        self.requester = requester
 
     def __str__(self):
         return self.title
 
 
 class YTDLSource(discord.PCMVolumeTransformer):
-    def __init__(self, source, *, data, volume=0.5):
+    def __init__(self, source, *, data, volume=0.5, requester=None):
         super().__init__(source, volume)
         self.data = data
         self.title = data.get('title', 'Unknown Title')
         self.url = data.get('url')
         self.webpage_url = data.get('webpage_url', '')
+        self.requester = requester
 
     @classmethod
-    async def from_url(cls, url: str, *, loop=None, stream=True):
+    async def from_url(cls, url: str, *, loop=None, stream=True, requester=None):
         loop = loop or asyncio.get_event_loop()
         print(f"[yt-dlp] Extracting info for: {url}")
 
@@ -70,7 +72,19 @@ class YTDLSource(discord.PCMVolumeTransformer):
 
         # Single track
         filename = data['url'] if stream else ytdl.prepare_filename(data)
-        return cls(discord.FFmpegPCMAudio(filename, **ffmpeg_options), data=data)
+        return cls(discord.FFmpegPCMAudio(filename, **ffmpeg_options), data=data, requester=requester)
+
+
+def format_duration(seconds):
+    if not seconds:
+        return "Live / Unknown"
+    minutes = int(seconds) // 60
+    seconds = int(seconds) % 60
+    hours = minutes // 60
+    minutes = minutes % 60
+    if hours > 0:
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes:02d}:{seconds:02d}"
 
 
 class Music(commands.Cog):
@@ -80,6 +94,13 @@ class Music(commands.Cog):
         self.queues: dict[int, deque[QueueEntry]] = {}
         # guild_id -> asyncio.Task
         self.disconnect_tasks: dict[int, asyncio.Task] = {}
+        # guild_id -> deque[str]
+        self.playing_histories: dict[int, deque[str]] = {}
+
+    def get_history(self, guild_id: int) -> deque[str]:
+        if guild_id not in self.playing_histories:
+            self.playing_histories[guild_id] = deque(maxlen=100)
+        return self.playing_histories[guild_id]
 
     # ------------------------------------------------------------------ #
     #  Helpers                                                             #
@@ -106,7 +127,11 @@ class Music(commands.Cog):
         vc = ctx.voice_client
         if vc and not vc.is_playing() and not self.get_queue(ctx):
             await vc.disconnect()
-            await ctx.send("💤 Disconnected karena 5 menit tidak ada aktivitas.")
+            embed = discord.Embed(
+                description="💤 **Disconnected** karena 5 menit tidak ada aktivitas.",
+                color=0xf1c40f
+            )
+            await ctx.send(embed=embed)
             print(f"[Jarvis] Auto-disconnect dari {ctx.guild.name}")
 
     async def get_spotify_metadata(self, url: str) -> str | None:
@@ -165,9 +190,57 @@ class Music(commands.Cog):
         print(f"[Spotify] Resolved to: {metadata}")
         return f"ytsearch:{metadata}"
 
+    def get_now_playing_embed(self, player, author):
+        embed = discord.Embed(
+            title="🎶 Now Playing",
+            description=f"**[{player.title}]({player.webpage_url})**",
+            color=0x00E5FF
+        )
+        thumbnail = player.data.get('thumbnail')
+        if thumbnail:
+            embed.set_thumbnail(url=thumbnail)
+        
+        uploader = player.data.get('uploader', 'Unknown')
+        duration = format_duration(player.data.get('duration'))
+        
+        embed.add_field(name="Uploader", value=uploader, inline=True)
+        embed.add_field(name="Duration", value=duration, inline=True)
+        
+        if author:
+            embed.set_footer(text=f"Diminta oleh {author.name}", icon_url=author.display_avatar.url)
+        return embed
+
+    def get_added_to_queue_embed(self, player, author, queue_len):
+        embed = discord.Embed(
+            title="📥 Added to Queue",
+            description=f"**[{player.title}]({player.webpage_url})**",
+            color=0x2ecc71
+        )
+        thumbnail = player.data.get('thumbnail')
+        if thumbnail:
+            embed.set_thumbnail(url=thumbnail)
+            
+        uploader = player.data.get('uploader', 'Unknown')
+        duration = format_duration(player.data.get('duration'))
+        
+        embed.add_field(name="Uploader", value=uploader, inline=True)
+        embed.add_field(name="Duration", value=duration, inline=True)
+        embed.add_field(name="Posisi Antrian", value=f"#{queue_len}", inline=True)
+        
+        if author:
+            embed.set_footer(text=f"Diminta oleh {author.name}", icon_url=author.display_avatar.url)
+        return embed
+
     # ------------------------------------------------------------------ #
     #  Playback core                                                       #
     # ------------------------------------------------------------------ #
+
+    async def _send_empty_queue_message(self, ctx: commands.Context):
+        embed = discord.Embed(
+            description="🎵 **Antrian lagu telah habis.** Memulai mode standby...",
+            color=0x00E5FF
+        )
+        await ctx.send(embed=embed)
 
     def play_next(self, ctx: commands.Context):
         """Called by discord.py after a track finishes (in a non-async thread)."""
@@ -179,6 +252,10 @@ class Music(commands.Cog):
             )
         else:
             self._schedule_disconnect(ctx)
+            if ctx.voice_client and ctx.voice_client.is_connected():
+                asyncio.run_coroutine_threadsafe(
+                    self._send_empty_queue_message(ctx), self.bot.loop
+                )
 
     async def _play_entry(self, ctx: commands.Context, entry: QueueEntry):
         """Resolve and play a single QueueEntry."""
@@ -191,13 +268,17 @@ class Music(commands.Cog):
         async with ctx.typing():
             try:
                 resolved_url = await self._resolve_search(entry.url)
-                result = await YTDLSource.from_url(resolved_url, loop=self.bot.loop, stream=True)
+                result = await YTDLSource.from_url(resolved_url, loop=self.bot.loop, stream=True, requester=entry.requester)
 
                 if isinstance(result, dict) and 'entries' in result:
                     # Unexpectedly got a playlist (e.g. a ytsearch that expanded)
                     entries = [e for e in result.get('entries', []) if e is not None]
                     if not entries:
-                        await ctx.send("❌ Tidak ada lagu yang bisa diputar.")
+                        embed = discord.Embed(
+                            description="❌ Tidak ada lagu yang bisa diputar.",
+                            color=0xff3333
+                        )
+                        await ctx.send(embed=embed)
                         self.play_next(ctx)
                         return
 
@@ -205,30 +286,49 @@ class Music(commands.Cog):
                     queue = self.get_queue(ctx)
                     for e in reversed(entries[1:]):
                         url = e.get('webpage_url') or e.get('url') or f"https://www.youtube.com/watch?v={e.get('id')}"
-                        queue.appendleft(QueueEntry(url, e.get('title', url)))
+                        queue.appendleft(QueueEntry(url, e.get('title', url), entry.requester))
 
                     # Play the first entry
                     first = entries[0]
                     first_url = first.get('webpage_url') or first.get('url') or f"https://www.youtube.com/watch?v={first.get('id')}"
-                    player = await YTDLSource.from_url(first_url, loop=self.bot.loop, stream=True)
+                    player = await YTDLSource.from_url(first_url, loop=self.bot.loop, stream=True, requester=entry.requester)
                     vc.play(player, after=lambda e: self._after_play(ctx, e))
-                    await ctx.send(f"🎶 Now playing: **{player.title}**")
+
+                    # Update playing history
+                    self.get_history(ctx.guild.id).append(player.title)
+
+                    embed = self.get_now_playing_embed(player, entry.requester or ctx.author)
+                    await ctx.send(embed=embed)
                 else:
                     player = result
                     vc.play(player, after=lambda e: self._after_play(ctx, e))
-                    await ctx.send(f"🎶 Now playing: **{player.title}**")
+
+                    # Update playing history
+                    self.get_history(ctx.guild.id).append(player.title)
+
+                    embed = self.get_now_playing_embed(player, entry.requester or ctx.author)
+                    await ctx.send(embed=embed)
 
             except Exception as e:
                 print(f"[_play_entry] Error: {e}")
-                await ctx.send(f"❌ Gagal memutar lagu: {e}\nMelanjutkan ke lagu berikutnya...")
+                embed = discord.Embed(
+                    title="⚠️ Playback Error",
+                    description=f"Gagal memutar lagu: {e}\nMelanjutkan ke lagu berikutnya...",
+                    color=0xff3333
+                )
+                await ctx.send(embed=embed)
                 self.play_next(ctx)
 
     def _after_play(self, ctx: commands.Context, error):
         """Callback setelah setiap lagu selesai."""
         if error:
             print(f"[after_play] Playback error: {error}")
+            embed = discord.Embed(
+                description=f"⚠️ Terjadi kesalahan saat memutar: {error}",
+                color=0xf1c40f
+            )
             asyncio.run_coroutine_threadsafe(
-                ctx.send(f"⚠️ Terjadi kesalahan saat memutar: {error}"),
+                ctx.send(embed=embed),
                 self.bot.loop
             )
         self.play_next(ctx)
@@ -240,19 +340,31 @@ class Music(commands.Cog):
     @commands.command(name='join', help='Bot masuk ke voice channel kamu')
     async def join(self, ctx: commands.Context):
         if not ctx.author.voice:
-            return await ctx.send(f"❌ {ctx.author.display_name} tidak sedang di voice channel!")
+            embed = discord.Embed(
+                description=f"❌ **{ctx.author.display_name}** tidak sedang di voice channel!",
+                color=0xff3333
+            )
+            return await ctx.send(embed=embed)
         channel = ctx.author.voice.channel
         if ctx.voice_client:
             await ctx.voice_client.move_to(channel)
         else:
             await channel.connect()
-        await ctx.send(f"✅ Bergabung ke **{channel.name}**")
+        embed = discord.Embed(
+            description=f"🟢 Bergabung ke voice channel: **{channel.name}**",
+            color=0x2ecc71
+        )
+        await ctx.send(embed=embed)
 
     @commands.command(name='play', help='Putar lagu / playlist dari YouTube, Spotify, SoundCloud, atau cari berdasarkan judul')
     async def play(self, ctx: commands.Context, *, search: str):
         # Auto-join voice channel
         if not ctx.author.voice:
-            return await ctx.send("❌ Kamu harus masuk ke voice channel terlebih dahulu.")
+            embed = discord.Embed(
+                description="❌ Kamu harus masuk ke voice channel terlebih dahulu.",
+                color=0xff3333
+            )
+            return await ctx.send(embed=embed)
         if ctx.voice_client is None:
             await ctx.author.voice.channel.connect()
         elif ctx.voice_client.channel != ctx.author.voice.channel:
@@ -262,14 +374,22 @@ class Music(commands.Cog):
 
         # Notify for Spotify early
         if 'spotify.com' in search:
-            await ctx.send("🔍 Link Spotify terdeteksi. Mencari lagu di YouTube...")
+            embed = discord.Embed(
+                description="🔍 **Link Spotify terdeteksi.** Mencari lagu di YouTube...",
+                color=0x1DB954
+            )
+            await ctx.send(embed=embed)
 
         async with ctx.typing():
             try:
                 resolved = await self._resolve_search(search)
-                result = await YTDLSource.from_url(resolved, loop=self.bot.loop, stream=True)
+                result = await YTDLSource.from_url(resolved, loop=self.bot.loop, stream=True, requester=ctx.author)
             except Exception as e:
-                return await ctx.send(f"❌ Error: {e}")
+                embed = discord.Embed(
+                    description=f"❌ Error: {e}",
+                    color=0xff3333
+                )
+                return await ctx.send(embed=embed)
 
         queue = self.get_queue(ctx)
 
@@ -277,64 +397,133 @@ class Music(commands.Cog):
         if isinstance(result, dict) and 'entries' in result:
             entries = [e for e in result.get('entries', []) if e is not None]
             if not entries:
-                return await ctx.send("❌ Playlist kosong atau tidak ada lagu yang bisa diputar.")
+                embed = discord.Embed(
+                    description="❌ Playlist kosong atau tidak ada lagu yang bisa diputar.",
+                    color=0xff3333
+                )
+                return await ctx.send(embed=embed)
 
             if vc.is_playing() or vc.is_paused():
                 for e in entries:
                     url = e.get('webpage_url') or e.get('url') or f"https://www.youtube.com/watch?v={e.get('id')}"
-                    queue.append(QueueEntry(url, e.get('title', url)))
-                return await ctx.send(f"🎶 Ditambahkan **{player.title}** lagu dari playlist ke antrian.")
+                    queue.append(QueueEntry(url, e.get('title', url), ctx.author))
+                
+                embed = discord.Embed(
+                    title="🎶 Playlist Added to Queue",
+                    description=f"Berhasil menambahkan **{len(entries)}** lagu dari playlist ke antrian.",
+                    color=0x2ecc71
+                )
+                embed.set_footer(text=f"Diminta oleh {ctx.author.name}", icon_url=ctx.author.display_avatar.url)
+                return await ctx.send(embed=embed)
 
             # Play first, queue the rest
             first = entries[0]
             first_url = first.get('webpage_url') or first.get('url') or f"https://www.youtube.com/watch?v={first.get('id')}"
             for e in entries[1:]:
                 url = e.get('webpage_url') or e.get('url') or f"https://www.youtube.com/watch?v={e.get('id')}"
-                queue.append(QueueEntry(url, e.get('title', url)))
+                queue.append(QueueEntry(url, e.get('title', url), ctx.author))
 
             try:
-                player = await YTDLSource.from_url(first_url, loop=self.bot.loop, stream=True)
+                player = await YTDLSource.from_url(first_url, loop=self.bot.loop, stream=True, requester=ctx.author)
                 vc.play(player, after=lambda e: self._after_play(ctx, e))
-                await ctx.send(
-                    f"🎶 Playlist terdeteksi! Menambahkan **{len(entries)}** lagu ke antrian.\n"
-                    f"Sekarang memutar: **{player.title}**"
+                
+                # Update playing history
+                self.get_history(ctx.guild.id).append(player.title)
+
+                embed = discord.Embed(
+                    title="🎶 Now Playing (Playlist)",
+                    description=f"**[{player.title}]({player.webpage_url})**",
+                    color=0x00E5FF
                 )
+                thumbnail = player.data.get('thumbnail')
+                if thumbnail:
+                    embed.set_thumbnail(url=thumbnail)
+                
+                uploader = player.data.get('uploader', 'Unknown')
+                duration = format_duration(player.data.get('duration'))
+                
+                embed.add_field(name="Uploader", value=uploader, inline=True)
+                embed.add_field(name="Duration", value=duration, inline=True)
+                embed.add_field(name="Playlist", value=f"Menambahkan **{len(entries) - 1}** lagu lainnya ke antrian.", inline=False)
+                
+                embed.set_footer(text=f"Diminta oleh {ctx.author.name}", icon_url=ctx.author.display_avatar.url)
+                await ctx.send(embed=embed)
             except Exception as e:
-                await ctx.send(f"❌ Gagal memulai playlist: {e}")
+                embed = discord.Embed(
+                    description=f"❌ Gagal memulai playlist: {e}",
+                    color=0xff3333
+                )
+                await ctx.send(embed=embed)
 
         # --- Single track ---
         else:
             player = result
             if vc.is_playing() or vc.is_paused():
-                queue.append(QueueEntry(player.webpage_url or search, player.title))
-                await ctx.send(f"✅ Ditambahkan ke antrian: **{player.title}**")
+                queue.append(QueueEntry(player.webpage_url or search, player.title, ctx.author))
+                embed = self.get_added_to_queue_embed(player, ctx.author, len(queue))
+                await ctx.send(embed=embed)
             else:
                 vc.play(player, after=lambda e: self._after_play(ctx, e))
-                await ctx.send(f"🎶 Sekarang memutar: **{player.title}**")
+                
+                # Update playing history
+                self.get_history(ctx.guild.id).append(player.title)
+
+                embed = self.get_now_playing_embed(player, ctx.author)
+                await ctx.send(embed=embed)
 
     @commands.command(name='pause', help='Pause lagu yang sedang diputar')
     async def pause(self, ctx: commands.Context):
         if ctx.voice_client and ctx.voice_client.is_playing():
             ctx.voice_client.pause()
-            await ctx.send(f"⏸️ Dijeda di menit {ctx.voice_client.position // 60}:{ctx.voice_client.position % 60:02d}.")
+            pos_text = ""
+            if hasattr(ctx.voice_client, 'position'):
+                pos_text = f" dijeda"
+            embed = discord.Embed(
+                description=f"⏸️ **Playback dijeda** di menit **{ctx.voice_client.position // 60}:{ctx.voice_client.position % 60:02d}** {pos_text}.",
+                color=0xf1c40f
+            )
+            await ctx.send(embed=embed)
         else:
-            await ctx.send("❌ Tidak ada lagu yang sedang diputar.")
+            embed = discord.Embed(
+                description="❌ Tidak ada lagu yang sedang diputar.",
+                color=0xff3333
+            )
+            await ctx.send(embed=embed)
 
     @commands.command(name='resume', help='Lanjutkan lagu yang dijeda')
     async def resume(self, ctx: commands.Context):
         if ctx.voice_client and ctx.voice_client.is_paused():
             ctx.voice_client.resume()
-            await ctx.send(f"▶️ Dilanjutkan di menit {ctx.voice_client.position // 60}:{ctx.voice_client.position % 60:02d}.")
+            pos_text = ""
+            if hasattr(ctx.voice_client, 'position'):
+                pos_text = f" dilanjutkan"
+            embed = discord.Embed(
+                description=f"▶️ **Playback dilanjutkan** di menit **{ctx.voice_client.position // 60}:{ctx.voice_client.position % 60:02d}** {pos_text}.",
+                color=0x2ecc71
+            )
+            await ctx.send(embed=embed)
         else:
-            await ctx.send("❌ Lagu tidak sedang dijeda.")
+            embed = discord.Embed(
+                description="❌ Lagu tidak sedang dijeda.",
+                color=0xff3333
+            )
+            await ctx.send(embed=embed)
 
     @commands.command(name='skip', help='Lewati lagu yang sedang diputar')
     async def skip(self, ctx: commands.Context):
         if ctx.voice_client and (ctx.voice_client.is_playing() or ctx.voice_client.is_paused()):
             ctx.voice_client.stop()  # triggers _after_play → play_next
-            await ctx.send("⏭️ Lagu dilewati.")
+            embed = discord.Embed(
+                description="⏭️ **Lagu dilewati.**",
+                color=0x00E5FF
+            )
+            await ctx.send(embed=embed)
         else:
-            await ctx.send("❌ Tidak ada lagu yang bisa dilewati.")
+            embed = discord.Embed(
+                description="❌ Tidak ada lagu yang bisa dilewati.",
+                color=0xff3333
+            )
+            await ctx.send(embed=embed)
 
     @commands.command(name='stop', help='Stop dan bot keluar dari voice channel')
     async def stop(self, ctx: commands.Context):
@@ -342,46 +531,116 @@ class Music(commands.Cog):
             self._cancel_disconnect(ctx.guild.id)
             self.get_queue(ctx).clear()
             await ctx.voice_client.disconnect()
-            await ctx.send("⏹️ Bot keluar dan antrian dihapus.")
+            embed = discord.Embed(
+                description="⏹️ **Bot keluar dan antrian dihapus.**",
+                color=0xe74c3c
+            )
+            await ctx.send(embed=embed)
         else:
-            await ctx.send("❌ Bot tidak ada di voice channel.")
+            embed = discord.Embed(
+                description="❌ Bot tidak ada di voice channel.",
+                color=0xff3333
+            )
+            await ctx.send(embed=embed)
 
     @commands.command(name='queue', help='Tampilkan antrian lagu saat ini')
     async def queue(self, ctx: commands.Context):
         q = self.get_queue(ctx)
+        vc = ctx.voice_client
+        
+        embed = discord.Embed(title="📋 Antrian Lagu", color=0x00E5FF)
+        
+        # Now playing
+        if vc and vc.is_playing() and hasattr(vc.source, 'title'):
+            embed.description = f"**Sekarang Memutar:**\n🎶 **{vc.source.title}**\n\n"
+        else:
+            embed.description = "**Sekarang Memutar:**\n💤 Tidak ada lagu yang sedang diputar.\n\n"
+            
+        # Up next
         if not q:
-            return await ctx.send("📭 Antrian kosong.")
-
-        lines = [f"`{i}.` {entry.title}" for i, entry in enumerate(q, 1)]
-        # Discord message limit guard
-        message = "**📋 Antrian Lagu:**\n" + "\n".join(lines[:20])
-        if len(q) > 20:
-            message += f"\n... dan **{len(q) - 20}** lagu lainnya."
-        await ctx.send(message)
+            embed.description += "**Antrian Selanjutnya:**\n📭 Antrian kosong."
+        else:
+            lines = []
+            for i, entry in enumerate(q, 1):
+                req_str = f" (diminta oleh {entry.requester.mention})" if entry.requester else ""
+                lines.append(f"`{i}.` {entry.title}{req_str}")
+            
+            queue_text = "\n".join(lines[:15])
+            if len(q) > 15:
+                queue_text += f"\n... dan **{len(q) - 15}** lagu lainnya."
+            
+            embed.description += f"**Antrian Selanjutnya:**\n{queue_text}"
+            
+        embed.set_footer(text=f"Total lagu dalam antrian: {len(q)}", icon_url=ctx.author.display_avatar.url)
+        await ctx.send(embed=embed)
 
     @commands.command(name='nowplaying', aliases=['np'], help='Tampilkan lagu yang sedang diputar')
     async def nowplaying(self, ctx: commands.Context):
         vc = ctx.voice_client
         if vc and vc.is_playing() and hasattr(vc.source, 'title'):
-            await ctx.send(f"🎵 Sedang memutar: **{vc.source.title}**")
+            requester = getattr(vc.source, 'requester', None) or ctx.author
+            embed = self.get_now_playing_embed(vc.source, requester)
+            await ctx.send(embed=embed)
         else:
-            await ctx.send("❌ Tidak ada lagu yang sedang diputar.")
+            embed = discord.Embed(
+                description="❌ Tidak ada lagu yang sedang diputar.",
+                color=0xff3333
+            )
+            await ctx.send(embed=embed)
+
+    @commands.command(name='playinghistory', aliases=['ph'], help='Tampilkan history lagu yang sudah diputar')
+    async def playing_history(self, ctx: commands.Context):
+        history = self.get_history(ctx.guild.id)
+        if not history:
+            embed = discord.Embed(
+                description="📭 Belum ada lagu yang diputar.",
+                color=0x00E5FF
+            )
+            return await ctx.send(embed=embed)
+
+        lines = [f"`{i}.` {title}" for i, title in enumerate(reversed(history), 1)]
+        embed = discord.Embed(
+            title="📜 Playing History",
+            description="\n".join(lines[:15]),
+            color=0x00E5FF
+        )
+        if len(history) > 15:
+            embed.description += f"\n... dan **{len(history) - 15}** lagu lainnya."
+            
+        embed.set_footer(text=f"Total history: {len(history)} lagu", icon_url=ctx.author.display_avatar.url)
+        await ctx.send(embed=embed)
 
     @commands.command(name='volume', help='Atur volume (0-100)')
     async def volume(self, ctx: commands.Context, vol: int):
         if not (0 <= vol <= 100):
-            return await ctx.send("❌ Volume harus antara 0 dan 100.")
+            embed = discord.Embed(
+                description="❌ Volume harus antara 0 dan 100.",
+                color=0xff3333
+            )
+            return await ctx.send(embed=embed)
         vc = ctx.voice_client
         if vc and hasattr(vc.source, 'volume'):
             vc.source.volume = vol / 100
-            await ctx.send(f"🔊 Volume diatur ke **{vol}%**")
+            embed = discord.Embed(
+                description=f"🔊 **Volume diatur ke {vol}%**",
+                color=0x00E5FF
+            )
+            await ctx.send(embed=embed)
         else:
-            await ctx.send("❌ Tidak ada audio yang sedang diputar.")
+            embed = discord.Embed(
+                description="❌ Tidak ada audio yang sedang diputar.",
+                color=0xff3333
+            )
+            await ctx.send(embed=embed)
 
     @commands.command(name='clear', help='Hapus semua lagu dalam antrian')
     async def clear(self, ctx: commands.Context):
         self.get_queue(ctx).clear()
-        await ctx.send("🗑️ Antrian telah dihapus.")
+        embed = discord.Embed(
+            description="🗑️ **Antrian telah dihapus.**",
+            color=0xe74c3c
+        )
+        await ctx.send(embed=embed)
 
     @commands.command(name='remove', help='Hapus lagu tertentu dari antrian berdasarkan nomor')
     async def remove(self, ctx: commands.Context, index: int):
@@ -389,9 +648,17 @@ class Music(commands.Cog):
         if 1 <= index <= len(q):
             removed = q[index - 1]
             del q[index - 1]
-            await ctx.send(f"❌ Dihapus dari antrian: **{removed.title}**")
+            embed = discord.Embed(
+                description=f"🗑️ **Dihapus dari antrian:** {removed.title}",
+                color=0xe74c3c
+            )
+            await ctx.send(embed=embed)
         else:
-            await ctx.send("❌ Nomor lagu tidak valid dalam antrian.")
+            embed = discord.Embed(
+                description="❌ Nomor lagu tidak valid dalam antrian.",
+                color=0xff3333
+            )
+            await ctx.send(embed=embed)
 
 
 async def setup(bot: commands.Bot):
