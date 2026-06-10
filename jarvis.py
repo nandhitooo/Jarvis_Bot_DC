@@ -4,7 +4,6 @@ from discord.ext import commands
 from dotenv import load_dotenv
 import asyncio
 import datetime
-from keep_alive import keep_alive
  
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
@@ -71,9 +70,13 @@ class Jarvis(commands.Bot):
         await self.process_commands(message)
  
     async def _send_help_menu(self, ctx: commands.Context):
+        now = __import__('datetime').datetime.now().strftime('%H:%M')
         embed = discord.Embed(
-            title="🤖 Jarvis — Command Menu",
-            description="Ready Boss! Berikut perintah yang tersedia:",
+            title="",
+            description=(
+                f"### 🤖 Jarvis — Personal AI Assistant\n"
+                f"Siap melayani, **{ctx.author.display_name}**. Pukul {now} — ada yang bisa saya bantu?"
+            ),
             color=0x00E5FF,
         )
         if self.user:
@@ -127,7 +130,7 @@ class Jarvis(commands.Bot):
         )
 
         embed.set_footer(
-            text=f"Still in development... • Diminta oleh {ctx.author.name}",
+            text=f"Jarvis v2.0  •  Powered by Groq LPU  •  {ctx.author.display_name}",
             icon_url=ctx.author.display_avatar.url
         )
         await ctx.send(embed=embed)
@@ -137,14 +140,16 @@ class Jarvis(commands.Bot):
             return  # Abaikan perintah yang tidak dikenal
         if isinstance(error, commands.MissingRequiredArgument):
             embed = discord.Embed(
-                description=f"❌ **Argumen kurang:** `{error.param.name}`\nKetik `!jarvis` untuk melihat bantuan.",
+                title="❌ Argumen Kurang",
+                description=f"Parameter **`{error.param.name}`** diperlukan. > Ketik `!jarvis` untuk melihat daftar perintah.",
                 color=0xff3333
             )
             await ctx.send(embed=embed)
             return
         if isinstance(error, commands.BadArgument):
             embed = discord.Embed(
-                description="❌ **Argumen tidak valid.**\nKetik `!jarvis` untuk melihat bantuan.",
+                title="❌ Format Tidak Valid",
+                description="Argumen yang diberikan tidak sesuai format. > Ketik `!jarvis` untuk melihat contoh penggunaan.",
                 color=0xff3333
             )
             await ctx.send(embed=embed)
@@ -153,7 +158,8 @@ class Jarvis(commands.Bot):
         # Log error teknis tanpa expose detail ke user
         print(f"[Error] Command '{ctx.command}': {error}")
         embed = discord.Embed(
-            description="⚠️ **Terjadi kesalahan.** Silakan coba lagi.",
+            title="⚠️ Terjadi Kesalahan",
+            description="Sesuatu berjalan tidak semestinya, Boss. Silakan coba lagi.",
             color=0xf1c40f
         )
         await ctx.send(embed=embed)
@@ -190,5 +196,4 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("[Jarvis] Bot dihentikan oleh user.")
-
+        print("[Jarvis] Bot dihentikan oleh author.")

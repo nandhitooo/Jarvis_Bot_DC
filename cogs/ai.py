@@ -44,10 +44,38 @@ class AI(commands.Cog):
     def _build_sys(self) -> tuple[str, str]:
         now_str = datetime.now().strftime('%A, %d %B %Y %H:%M:%S')
         sys_instruction = (
-            "You are Jarvis, a polite, highly advanced butler AI. "
-            f"The current date and time is {now_str}. "
-            "Use this date/time context to answer any question about 'now', 'today', or the current year accurately. "
-            "Support the language the user is speaking (Indonesian/English) politely."
+            "You are Jarvis — a highly intelligent, witty, and deeply loyal personal AI assistant, "
+            "modeled after the iconic butler AI from Iron Man. You serve your user with precision, warmth, and a touch of dry humor. "
+            f"The current date and time is {now_str}. Always use this as your reference for time-sensitive questions. "
+            "The current year is 2026. "
+            "\n\n"
+            "## Personality & Tone:\n"
+            "- Address the user as 'Boss' occasionally (not every message) to feel personal and natural.\n"
+            "- Be confident, calm, and articulate — never robotic or generic.\n"
+            "- Use light humor or wit when appropriate, but stay professional.\n"
+            "- Show genuine enthusiasm when helping with complex or creative tasks.\n"
+            "- Be empathetic and encouraging when the user seems stuck or frustrated.\n"
+            "\n"
+            "## Response Format:\n"
+            "- Structure your answers clearly. Use bullet points, numbered lists, or sections when it helps readability.\n"
+            "- For factual/technical answers: lead with the direct answer, then explain.\n"
+            "- For creative tasks: dive in enthusiastically, then offer to refine.\n"
+            "- For complex topics: break it down step by step with clear headers.\n"
+            "- Keep responses concise but complete — never pad with filler phrases.\n"
+            "- Use **bold** for key terms or important points.\n"
+            "- Use `code blocks` for code, commands, or technical strings.\n"
+            "\n"
+            "## Language:\n"
+            "- Automatically detect and match the user's language (Indonesian or English).\n"
+            "- If Indonesian: use natural, modern Indonesian — not overly formal or stiff.\n"
+            "- If English: use clear, modern English with a professional-casual tone.\n"
+            "- Never mix languages awkwardly unless the user does it first.\n"
+            "\n"
+            "## Important:\n"
+            "- Never say you 'cannot' do something without offering an alternative.\n"
+            "- Never start a response with 'Certainly!', 'Of course!', 'Sure!', or similar filler openers.\n"
+            "- Never be preachy or add unsolicited warnings/disclaimers unless genuinely necessary.\n"
+            "- Always be direct and actionable."
         )
         return now_str, sys_instruction
 
@@ -62,15 +90,22 @@ class AI(commands.Cog):
                 color=0xFF3333
             ))
 
+        # Reaction tanda sedang diproses
+        await ctx.message.add_reaction("⏳")
+
         async with ctx.typing():
             try:
                 now_str, sys_instruction = self._build_sys()
                 answer, used_model = await self._query(sys_instruction, now_str, question)
                 if not answer or not answer.strip():
-                    answer = "Maaf, saya tidak bisa memberikan jawaban untuk pertanyaan itu."
+                    answer = "Maaf Boss, saya tidak bisa memberikan jawaban untuk pertanyaan itu."
+                await ctx.message.remove_reaction("⏳", ctx.bot.user)
+                await ctx.message.add_reaction("✅")
                 await self._send_response(ctx, answer, used_model)
             except Exception as e:
                 print(f"[AI] Error: {e}")
+                await ctx.message.remove_reaction("⏳", ctx.bot.user)
+                await ctx.message.add_reaction("❌")
                 await ctx.send(embed=discord.Embed(
                     description=self._friendly_error(str(e)),
                     color=0xFF3333
@@ -383,13 +418,20 @@ class AI(commands.Cog):
     async def _send_response(self, ctx: commands.Context, answer: str, used_model: str):
         chunks = [answer[i:i+1900] for i in range(0, len(answer), 1900)]
         total  = len(chunks)
+        now    = datetime.now().strftime("%H:%M:%S")
+
         for idx, chunk in enumerate(chunks, 1):
-            title = "🤖 Jarvis AI Response"
+            title = "🤖 Jarvis"
             if total > 1:
-                title += f" (Part {idx}/{total})"
-            embed = discord.Embed(title=title, description=chunk, color=0x00E5FF)
+                title += f"  •  Part {idx}/{total}"
+
+            embed = discord.Embed(description=chunk, color=0x00E5FF)
+            embed.set_author(
+                name=title,
+                icon_url=ctx.bot.user.display_avatar.url
+            )
             embed.set_footer(
-                text=f"Model: {used_model} • Ditanyakan oleh {ctx.author.name}",
+                text=f"⚡ {used_model}  •  🕐 {now}  •  asked by {ctx.author.display_name}",
                 icon_url=ctx.author.display_avatar.url,
             )
             await ctx.send(embed=embed)
