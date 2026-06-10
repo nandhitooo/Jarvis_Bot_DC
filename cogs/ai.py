@@ -16,16 +16,25 @@ class AI(commands.Cog):
         self.client    = None
         self.available = False
 
-        api_key = os.getenv("GROQ_API_KEY")
-        if api_key:
-            self.client = AsyncOpenAI(
-                api_key=api_key,
-                base_url="https://api.groq.com/openai/v1",
-            )
+        # ── Cek apakah pakai Jarvis Custom API atau langsung Groq ──
+        self.jarvis_api_url = os.getenv("JARVIS_API_URL")   # e.g. http://localhost:8000
+        self.jarvis_api_key = os.getenv("JARVIS_API_SECRET", "jarvis-secret-key")
+
+        if self.jarvis_api_url:
             self.available = True
-            print("[AI] ✅ Groq API configured.")
+            print(f"[AI] ✅ Jarvis Custom API: {self.jarvis_api_url}")
         else:
-            print("[AI] ⚠️  GROQ_API_KEY not found in .env")
+            # Fallback: langsung ke Groq
+            api_key = os.getenv("GROQ_API_KEY")
+            if api_key:
+                self.client = AsyncOpenAI(
+                    api_key=api_key,
+                    base_url="https://api.groq.com/openai/v1",
+                )
+                self.available = True
+                print("[AI] ✅ Groq API configured (direct).")
+            else:
+                print("[AI] ⚠️  No AI backend configured (set JARVIS_API_URL or GROQ_API_KEY)")
 
         # Load models from .env
         self.models = []
@@ -34,6 +43,12 @@ class AI(commands.Cog):
             label = os.getenv(f"GROQ_MODEL_LABEL_{i}")
             if mid and label:
                 self.models.append((mid, label))
+        if not self.models:
+            self.models = [
+                ("llama-3.3-70b-versatile", "Llama 3.3 70B"),
+                ("llama-3.1-8b-instant",    "Llama 3.1 8B"),
+                ("gemma2-9b-it",            "Gemma 2 9B"),
+            ]
 
         self.custom_image_url = os.getenv("CUSTOM_IMAGE_API_URL")
         self.custom_image_key = os.getenv("CUSTOM_IMAGE_API_KEY")
@@ -44,38 +59,10 @@ class AI(commands.Cog):
     def _build_sys(self) -> tuple[str, str]:
         now_str = datetime.now().strftime('%A, %d %B %Y %H:%M:%S')
         sys_instruction = (
-            "You are Jarvis — a highly intelligent, witty, and deeply loyal personal AI assistant, "
-            "modeled after the iconic butler AI from Iron Man. You serve your user with precision, warmth, and a touch of dry humor. "
-            f"The current date and time is {now_str}. Always use this as your reference for time-sensitive questions. "
-            "The current year is 2026. "
-            "\n\n"
-            "## Personality & Tone:\n"
-            "- Address the user as 'Boss' occasionally (not every message) to feel personal and natural.\n"
-            "- Be confident, calm, and articulate — never robotic or generic.\n"
-            "- Use light humor or wit when appropriate, but stay professional.\n"
-            "- Show genuine enthusiasm when helping with complex or creative tasks.\n"
-            "- Be empathetic and encouraging when the user seems stuck or frustrated.\n"
-            "\n"
-            "## Response Format:\n"
-            "- Structure your answers clearly. Use bullet points, numbered lists, or sections when it helps readability.\n"
-            "- For factual/technical answers: lead with the direct answer, then explain.\n"
-            "- For creative tasks: dive in enthusiastically, then offer to refine.\n"
-            "- For complex topics: break it down step by step with clear headers.\n"
-            "- Keep responses concise but complete — never pad with filler phrases.\n"
-            "- Use **bold** for key terms or important points.\n"
-            "- Use `code blocks` for code, commands, or technical strings.\n"
-            "\n"
-            "## Language:\n"
-            "- Automatically detect and match the user's language (Indonesian or English).\n"
-            "- If Indonesian: use natural, modern Indonesian — not overly formal or stiff.\n"
-            "- If English: use clear, modern English with a professional-casual tone.\n"
-            "- Never mix languages awkwardly unless the user does it first.\n"
-            "\n"
-            "## Important:\n"
-            "- Never say you 'cannot' do something without offering an alternative.\n"
-            "- Never start a response with 'Certainly!', 'Of course!', 'Sure!', or similar filler openers.\n"
-            "- Never be preachy or add unsolicited warnings/disclaimers unless genuinely necessary.\n"
-            "- Always be direct and actionable."
+            "You are Jarvis, a polite, highly advanced butler AI. "
+            f"The current date and time is {now_str}. "
+            "Use this date/time context to answer any question about 'now', 'today', or the current year accurately. "
+            "Support the language the user is speaking (Indonesian/English) politely."
         )
         return now_str, sys_instruction
 
@@ -90,22 +77,15 @@ class AI(commands.Cog):
                 color=0xFF3333
             ))
 
-        # Reaction tanda sedang diproses
-        await ctx.message.add_reaction("⏳")
-
         async with ctx.typing():
             try:
                 now_str, sys_instruction = self._build_sys()
                 answer, used_model = await self._query(sys_instruction, now_str, question)
                 if not answer or not answer.strip():
-                    answer = "Maaf Boss, saya tidak bisa memberikan jawaban untuk pertanyaan itu."
-                await ctx.message.remove_reaction("⏳", ctx.bot.user)
-                await ctx.message.add_reaction("✅")
+                    answer = "Maaf, saya tidak bisa memberikan jawaban untuk pertanyaan itu."
                 await self._send_response(ctx, answer, used_model)
             except Exception as e:
                 print(f"[AI] Error: {e}")
-                await ctx.message.remove_reaction("⏳", ctx.bot.user)
-                await ctx.message.add_reaction("❌")
                 await ctx.send(embed=discord.Embed(
                     description=self._friendly_error(str(e)),
                     color=0xFF3333
@@ -365,39 +345,69 @@ class AI(commands.Cog):
             raise ValueError(f"Gagal membaca PDF: {e}")
 
     # ────────────────────────────────────────────────────────────
-    # Internal: query Groq dengan fallback antar model
+    # Internal: query — otomatis pilih Jarvis API atau Groq direct
     # ────────────────────────────────────────────────────────────
     async def _query(self, sys_instruction: str, now_str: str, question: str, max_tokens: int = 1000):
-        enriched   = f"[Context: {now_str}]\n{question}" if now_str else question
+        enriched = f"[Context: {now_str}]\n{question}" if now_str else question
+
+        if self.jarvis_api_url:
+            return await self._query_jarvis_api(enriched, sys_instruction, max_tokens)
+        else:
+            return await self._query_groq_direct(enriched, sys_instruction, max_tokens)
+
+    async def _query_jarvis_api(self, message: str, system: str, max_tokens: int):
+        """Kirim request ke Jarvis Custom API (api_server.py)."""
+        payload = {
+            "message":       message,
+            "system_prompt": system,
+            "provider":      "auto",
+            "max_tokens":    max_tokens,
+            "temperature":   0.7,
+        }
+        headers = {
+            "x-api-key":    self.jarvis_api_key,
+            "Content-Type": "application/json",
+        }
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{self.jarvis_api_url}/chat",
+                json=payload,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=60),
+            ) as resp:
+                if resp.status == 401:
+                    raise Exception("🔑 **JARVIS_API_SECRET** tidak valid.")
+                if resp.status == 503:
+                    data = await resp.json()
+                    raise Exception(f"Semua provider gagal: {data.get('detail', {}).get('errors', {})}")
+                if resp.status != 200:
+                    raise Exception(f"Jarvis API error HTTP {resp.status}")
+                data = await resp.json()
+                model_label = f"{data['provider'].capitalize()} — {data['model']} ({data['latency_ms']}ms)"
+                return data["answer"], model_label
+
+    async def _query_groq_direct(self, message: str, system: str, max_tokens: int):
+        """Fallback: query langsung ke Groq tanpa custom API."""
         last_error = None
-
-        if not self.models:
-            raise Exception("Tidak ada model AI yang terkonfigurasi.")
-
         for model_id, model_label in self.models:
             try:
-                print(f"[AI] Trying model: {model_id}")
+                print(f"[AI] Trying Groq model: {model_id}")
                 response = await self.client.chat.completions.create(
                     model=model_id,
                     messages=[
-                        {"role": "system", "content": sys_instruction},
-                        {"role": "user",   "content": enriched},
+                        {"role": "system", "content": system},
+                        {"role": "user",   "content": message},
                     ],
                     max_tokens=max_tokens,
                     temperature=0.7,
                 )
-                answer = response.choices[0].message.content
-                print(f"[AI] Success: {model_id}")
-                return answer, model_label
-
+                return response.choices[0].message.content, model_label
             except Exception as e:
                 err_str = str(e)
                 print(f"[AI] {model_id} failed: {err_str}")
                 if "401" in err_str or "invalid_api_key" in err_str.lower():
-                    raise Exception("🔑 **API Key Groq tidak valid.** Periksa kembali file `.env`.")
+                    raise Exception("🔑 **API Key Groq tidak valid.**")
                 last_error = e
-                continue
-
         raise last_error or Exception("Semua model Groq gagal merespons.")
 
     # ────────────────────────────────────────────────────────────
@@ -418,20 +428,13 @@ class AI(commands.Cog):
     async def _send_response(self, ctx: commands.Context, answer: str, used_model: str):
         chunks = [answer[i:i+1900] for i in range(0, len(answer), 1900)]
         total  = len(chunks)
-        now    = datetime.now().strftime("%H:%M:%S")
-
         for idx, chunk in enumerate(chunks, 1):
-            title = "🤖 Jarvis"
+            title = "🤖 Jarvis AI Response"
             if total > 1:
-                title += f"  •  Part {idx}/{total}"
-
-            embed = discord.Embed(description=chunk, color=0x00E5FF)
-            embed.set_author(
-                name=title,
-                icon_url=ctx.bot.user.display_avatar.url
-            )
+                title += f" (Part {idx}/{total})"
+            embed = discord.Embed(title=title, description=chunk, color=0x00E5FF)
             embed.set_footer(
-                text=f"⚡ {used_model}  •  🕐 {now}  •  asked by {ctx.author.display_name}",
+                text=f"Model: {used_model} • Ditanyakan oleh {ctx.author.name}",
                 icon_url=ctx.author.display_avatar.url,
             )
             await ctx.send(embed=embed)

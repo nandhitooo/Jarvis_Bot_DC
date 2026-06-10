@@ -685,8 +685,8 @@ class Music(commands.Cog):
         )
         await ctx.send(embed=embed)
 
-    @commands.command(name='clear', help='Hapus semua lagu dalam antrian')
-    async def clear(self, ctx: commands.Context):
+    @commands.command(name='clearqueue', aliases=['cq'], help='Hapus semua lagu dalam antrian')
+    async def clearqueue(self, ctx: commands.Context):
         self.get_queue(ctx).clear()
         embed = discord.Embed(
             description="🗑️ **Antrian telah dihapus.**",

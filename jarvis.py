@@ -181,8 +181,6 @@ async def main():
         print("[Error] DISCORD_TOKEN tidak ditemukan di file .env")
         return
     
-    keep_alive()
- 
     async with bot:
         try:
             await bot.start(TOKEN)

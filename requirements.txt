@@ -8,3 +8,5 @@ openai
 groq
 spotipy
 flask
+fastapi
+uvicorn
