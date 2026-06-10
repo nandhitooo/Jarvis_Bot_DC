@@ -114,6 +114,27 @@ class Jarvis(commands.Bot):
         )
 
         embed.add_field(
+            name="⚙️ Moderator",
+            value=(
+                "`!jarvis kick <@user> [alasan]` — Kick user\n"
+                "`!jarvis ban <@user> [alasan]` — Ban user\n"
+                "`!jarvis unban <@user>` — Unban user\n"
+                "`!jarvis timeout <@user> <menit> [alasan]` — Timeout user\n"
+                "`!jarvis untimeout <@user>` — Untimeout user\n"
+                "`!jarvis mute <@user> [alasan]` — Mute user\n"
+                "`!jarvis unmute <@user>` — Unmute user\n"
+                "`!jarvis clear <jumlah>` — Hapus pesan\n"
+                "`!jarvis warn <@user> [alasan]` — Warn user\n"
+                "`!jarvis warnings <@user>` — Lihat warn user\n"
+                "`!jarvis clearwarns <@user>` — Hapus semua warn user\n"
+                "`!jarvis slowmode <detik>` — Set slowmode channel\n"
+                "`!jarvis lock` — Lock channel\n"
+                "`!jarvis unlock` — Unlock channel\n"
+            ),
+            inline=False,
+        )
+
+        embed.add_field(
             name="🛠️ Utilitas",
             value=(
                 "`!jarvis ping` — Cek latensi bot\n"

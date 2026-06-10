@@ -76,7 +76,7 @@ class Moderation(commands.Cog):
     # ────────────────────────────────────────────────────────────
     # TIMEOUT (Mute sementara — built-in Discord)
     # ────────────────────────────────────────────────────────────
-    @commands.command(name='timeout', aliases=['mute'], help='Timeout user (menit). Contoh: !jarvis timeout @user 10 spam')
+    @commands.command(name='timeout', help='Timeout user (menit). Contoh: !jarvis timeout @user 10 spam')
     @commands.has_permissions(moderate_members=True)
     async def timeout(self, ctx: commands.Context, member: discord.Member, durasi: int = 10, *, reason: str = "Tidak ada alasan"):
         err = self._can_moderate(ctx, member)
@@ -98,7 +98,7 @@ class Moderation(commands.Cog):
         embed.set_thumbnail(url=member.display_avatar.url)
         await ctx.send(embed=embed)
 
-    @commands.command(name='untimeout', aliases=['unmute'], help='Hapus timeout user')
+    @commands.command(name='untimeout', help='Hapus timeout user')
     @commands.has_permissions(moderate_members=True)
     async def untimeout(self, ctx: commands.Context, member: discord.Member):
         await member.timeout(None)
@@ -219,6 +219,40 @@ class Moderation(commands.Cog):
             description=f"🔓 Channel **{ctx.channel.name}** dibuka oleh {ctx.author.mention}.",
             color=0x2ecc71
         ))
+
+    @commands.command(name='mute', help='Mute user')
+    @commands.has_permissions(manage_roles=True)
+    async def mute(self, ctx: commands.Context, member: discord.Member, *, reason: str = "Tidak ada alasan"):
+        err = self._can_moderate(ctx, member)
+        if err:
+            return await ctx.send(embed=self._mod_embed("❌ Gagal", err))
+
+        muted_role = discord.utils.get(ctx.guild.roles, name="Muted")
+        if not muted_role:
+            muted_role = await ctx.guild.create_role(name="Muted", permissions=discord.Permissions(send_messages=False))
+            for channel in ctx.guild.channels:
+                await channel.set_permissions(muted_role, send_messages=False)
+
+        await member.add_roles(muted_role, reason=f"{reason} | Oleh: {ctx.author}")
+        embed = discord.Embed(title="🔇 Member Dimute", color=0xF1C40F)
+        embed.add_field(name="User",   value=f"{member} (`{member.id}`)", inline=False)
+        embed.add_field(name="Alasan", value=reason, inline=False)
+        embed.add_field(name="Oleh",   value=ctx.author.mention, inline=False)
+        embed.set_thumbnail(url=member.display_avatar.url)
+        await ctx.send(embed=embed)
+
+    @commands.command(name='unmute', help='Unmute user')
+    @commands.has_permissions(manage_roles=True)
+    async def unmute(self, ctx: commands.Context, member: discord.Member):
+        muted_role = discord.utils.get(ctx.guild.roles, name="Muted")
+        if muted_role and muted_role in member.roles:
+            await member.remove_roles(muted_role, reason=f"Oleh: {ctx.author}")
+            embed = discord.Embed(title="🔊 Member Diunmute", color=0x2ecc71)
+            embed.add_field(name="User", value=f"{member} (`{member.id}`)", inline=False)
+            embed.add_field(name="Oleh", value=ctx.author.mention, inline=False)
+            await ctx.send(embed=embed)
+        else:
+            await ctx.send(embed=self._mod_embed("❌ Gagal", "User ini tidak sedang dimute."))
 
     # ────────────────────────────────────────────────────────────
     # ERROR HANDLER — permission errors
