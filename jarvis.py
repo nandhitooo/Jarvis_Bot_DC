@@ -4,6 +4,7 @@ from discord.ext import commands
 from dotenv import load_dotenv
 import asyncio
 import datetime
+from keep_alive import keep_alive
  
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
@@ -173,6 +174,8 @@ async def main():
     if not TOKEN:
         print("[Error] DISCORD_TOKEN tidak ditemukan di file .env")
         return
+    
+    keep_alive()
  
     async with bot:
         try:
@@ -188,3 +191,4 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         print("[Jarvis] Bot dihentikan oleh user.")
+
