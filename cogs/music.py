@@ -49,6 +49,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
         self.title = data.get('title', 'Unknown Title')
         self.url = data.get('url')
         self.webpage_url = data.get('webpage_url', '')
+        self.duration = data.get('duration')
         self.requester = requester
 
     @classmethod
@@ -107,6 +108,28 @@ class Music(commands.Cog):
     def get_volume(self, guild_id: int) -> float:
         """Return saved volume for a guild (default 0.5)."""
         return self.guild_volumes.get(guild_id, 0.5)
+
+    def extract_song_metadata(self, data: dict) -> dict[str, str]:
+        artist = data.get('artist') or data.get('creator') or data.get('track')
+        album = data.get('album') or data.get('album_artist')
+        if not artist:
+            title = data.get('title', '')
+            if ' - ' in title:
+                left, _ = title.split(' - ', 1)
+                if len(left) <= 40:
+                    artist = left.strip()
+        if not artist:
+            artist = 'Unknown'
+        if not album:
+            album = 'Unknown'
+
+        return {
+            'artist': artist,
+            'album': album,
+            'uploader': data.get('uploader', 'Unknown'),
+            'duration': format_duration(data.get('duration')),
+            'extractor': data.get('extractor', 'Unknown').capitalize(),
+        }
 
     # ------------------------------------------------------------------ #
     #  Helpers                                                             #
@@ -197,6 +220,7 @@ class Music(commands.Cog):
         return f"ytsearch:{metadata}"
 
     def get_now_playing_embed(self, player, author):
+        metadata = self.extract_song_metadata(player.data)
         embed = discord.Embed(
             title="🎶 Now Playing",
             description=f"**[{player.title}]({player.webpage_url})**",
@@ -206,17 +230,18 @@ class Music(commands.Cog):
         if thumbnail:
             embed.set_thumbnail(url=thumbnail)
         
-        uploader = player.data.get('uploader', 'Unknown')
-        duration = format_duration(player.data.get('duration'))
-        
-        embed.add_field(name="Uploader", value=uploader, inline=True)
-        embed.add_field(name="Duration", value=duration, inline=True)
+        embed.add_field(name="Artis", value=metadata['artist'], inline=True)
+        embed.add_field(name="Album", value=metadata['album'], inline=True)
+        embed.add_field(name="Uploader", value=metadata['uploader'], inline=True)
+        embed.add_field(name="Durasi", value=metadata['duration'], inline=True)
+        embed.add_field(name="Sumber", value=metadata['extractor'], inline=True)
         
         if author:
             embed.set_footer(text=f"Diminta oleh {author.name}", icon_url=author.display_avatar.url)
         return embed
 
     def get_added_to_queue_embed(self, player, author, queue_len):
+        metadata = self.extract_song_metadata(player.data)
         embed = discord.Embed(
             title="📥 Added to Queue",
             description=f"**[{player.title}]({player.webpage_url})**",
@@ -226,11 +251,10 @@ class Music(commands.Cog):
         if thumbnail:
             embed.set_thumbnail(url=thumbnail)
             
-        uploader = player.data.get('uploader', 'Unknown')
-        duration = format_duration(player.data.get('duration'))
-        
-        embed.add_field(name="Uploader", value=uploader, inline=True)
-        embed.add_field(name="Duration", value=duration, inline=True)
+        embed.add_field(name="Artis", value=metadata['artist'], inline=True)
+        embed.add_field(name="Album", value=metadata['album'], inline=True)
+        embed.add_field(name="Uploader", value=metadata['uploader'], inline=True)
+        embed.add_field(name="Durasi", value=metadata['duration'], inline=True)
         embed.add_field(name="Posisi Antrian", value=f"#{queue_len}", inline=True)
         
         if author:
@@ -416,12 +440,29 @@ class Music(commands.Cog):
                     url = e.get('webpage_url') or e.get('url') or f"https://www.youtube.com/watch?v={e.get('id')}"
                     queue.append(QueueEntry(url, e.get('title', url), ctx.author))
                 
+                first_entry = entries[0]
+                first_title = first_entry.get('title', 'Unknown Track')
+                first_url = first_entry.get('webpage_url') or first_entry.get('url') or f"https://www.youtube.com/watch?v={first_entry.get('id')}"
+                metadata = self.extract_song_metadata(first_entry)
+                
                 embed = discord.Embed(
                     title="🎶 Playlist Added to Queue",
-                    description=f"Berhasil menambahkan **{len(entries)}** lagu dari playlist ke antrian.",
+                    description=(
+                        f"Berhasil menambahkan **{len(entries)}** lagu dari playlist ke antrian."
+                        f"\n\nLagu: **[{first_title}]({first_url})**"
+                    ),
                     color=0x2ecc71
                 )
-                embed.set_footer(text=f"Diminta oleh {ctx.author.name}", icon_url=ctx.author.display_avatar.url)
+                thumbnail = first_entry.get('thumbnail') or result.get('thumbnail')
+                if thumbnail:
+                    embed.set_thumbnail(url=thumbnail)
+                
+                embed.add_field(name="Artis", value=metadata['artist'], inline=True)
+                embed.add_field(name="Album", value=metadata['album'], inline=True)
+                embed.add_field(name="Durasi", value=metadata['duration'], inline=True)
+                embed.add_field(name="Total Lagu", value=f"{len(entries)}", inline=True)
+                embed.add_field(name="Posisi Antrian", value=f"#{len(queue) - len(entries) + 1} s/d #{len(queue)}", inline=True)
+                embed.set_footer(text=f"Diminta oleh {ctx.author.name} • Total antrian: {len(queue)}", icon_url=ctx.author.display_avatar.url)
                 return await ctx.send(embed=embed)
 
             # Play first, queue the rest
@@ -439,6 +480,7 @@ class Music(commands.Cog):
                 # Update playing history
                 self.get_history(ctx.guild.id).append(player.title)
 
+                metadata = self.extract_song_metadata(player.data)
                 embed = discord.Embed(
                     title="🎶 Now Playing (Playlist)",
                     description=f"**[{player.title}]({player.webpage_url})**",
@@ -448,11 +490,10 @@ class Music(commands.Cog):
                 if thumbnail:
                     embed.set_thumbnail(url=thumbnail)
                 
-                uploader = player.data.get('uploader', 'Unknown')
-                duration = format_duration(player.data.get('duration'))
-                
-                embed.add_field(name="Uploader", value=uploader, inline=True)
-                embed.add_field(name="Duration", value=duration, inline=True)
+                embed.add_field(name="Artis", value=metadata['artist'], inline=True)
+                embed.add_field(name="Album", value=metadata['album'], inline=True)
+                embed.add_field(name="Uploader", value=metadata['uploader'], inline=True)
+                embed.add_field(name="Durasi", value=metadata['duration'], inline=True)
                 embed.add_field(name="Playlist", value=f"Menambahkan **{len(entries) - 1}** lagu lainnya ke antrian.", inline=False)
                 
                 embed.set_footer(text=f"Diminta oleh {ctx.author.name}", icon_url=ctx.author.display_avatar.url)
@@ -466,12 +507,15 @@ class Music(commands.Cog):
 
         # --- Single track ---
         else:
-            player = result
             if vc.is_playing() or vc.is_paused():
+                # For single tracks that are not yet "YTDLSource" objects (still just data/metadata)
+                # result here is the YTDLSource object because YTDLSource.from_url was called above
+                player = result 
                 queue.append(QueueEntry(player.webpage_url or search, player.title, ctx.author))
                 embed = self.get_added_to_queue_embed(player, ctx.author, len(queue))
                 await ctx.send(embed=embed)
             else:
+                player = result
                 player.volume = self.get_volume(ctx.guild.id)
                 vc.play(player, after=lambda e: self._after_play(ctx, e))
                 
@@ -489,7 +533,7 @@ class Music(commands.Cog):
             if hasattr(ctx.voice_client.source, 'title'):
                 title = f" — **{ctx.voice_client.source.title}**"
             embed = discord.Embed(
-                description=f"⏸️ **Playback dijeda.**{title}",
+                description=f"⏸️ **Playback dijeda.**{title}, dimenit: **{format_duration(ctx.voice_client.source.duration)}**",
                 color=0xf1c40f
             )
             await ctx.send(embed=embed)
@@ -508,7 +552,7 @@ class Music(commands.Cog):
             if hasattr(ctx.voice_client.source, 'title'):
                 title = f" — **{ctx.voice_client.source.title}**"
             embed = discord.Embed(
-                description=f"▶️ **Playback dilanjutkan.**{title}",
+                description=f"▶️ **Playback dilanjutkan.**{title}, dimenit: **{format_duration(ctx.voice_client.source.duration)}**",
                 color=0x2ecc71
             )
             await ctx.send(embed=embed)
@@ -629,7 +673,6 @@ class Music(commands.Cog):
             )
             return await ctx.send(embed=embed)
 
-        # Simpan volume untuk guild ini agar berlaku ke semua lagu berikutnya
         self.guild_volumes[ctx.guild.id] = vol / 100
 
         vc = ctx.voice_client

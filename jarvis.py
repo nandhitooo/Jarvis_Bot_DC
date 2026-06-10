@@ -3,11 +3,11 @@ import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 import asyncio
+import datetime
  
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
- 
- 
+
 class Jarvis(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
@@ -18,6 +18,7 @@ class Jarvis(commands.Bot):
             case_insensitive=True,
             help_command=None,
         )
+        self.start_time = datetime.datetime.now(datetime.timezone.utc)
  
     async def setup_hook(self):
         cogs_dir = './cogs'
@@ -35,6 +36,14 @@ class Jarvis(commands.Bot):
                     print(f"[Jarvis] Gagal load {ext}: {e}")
  
     async def on_ready(self):
+        # Load opus library dari folder lib
+        if not discord.opus.is_loaded():
+            try:
+                discord.opus.load_opus('./lib/libopus.dll')
+                print("[Jarvis] Opus library loaded successfully from ./lib/libopus.dll")
+            except Exception as e:
+                print(f"[Jarvis] Gagal load Opus: {e}")
+
         print(f"[Jarvis] {self.user} siap! ({self.user.id})")
         print(f"[Jarvis] Cogs aktif: {list(self.cogs.keys()) or 'Tidak ada'}")
  
@@ -104,7 +113,14 @@ class Jarvis(commands.Bot):
             name="🛠️ Utilitas",
             value=(
                 "`!jarvis ping` — Cek latensi bot\n"
-                "`!jarvis cogs` — Lihat cogs yang aktif"
+                "`!jarvis info` — Lihat info bot\n"
+                "`!jarvis help` — Tampilkan menu bantuan\n"
+                "`!jarvis invite` — Dapatkan link invite bot\n"
+                "`!jarvis uptime` — Lihat berapa lama bot sudah online\n"
+                "`!jarvis stats` — Statistik penggunaan bot\n"
+                "`!jarvis userinfo <@user>` — Lihat informasi user\n"
+                "`!jarvis serverinfo` — Lihat informasi server\n"
+                "`!jarvis cogs` — Lihat cogs yang aktif\n"
             ),
             inline=False,
         )
@@ -152,55 +168,7 @@ class Jarvis(commands.Bot):
         await super().close()
 
 
-bot = Jarvis()
-
-
-@bot.command(name='cogs', help='Tampilkan cogs yang sedang aktif')
-async def list_cogs(ctx: commands.Context):
-    loaded = ', '.join(bot.cogs.keys()) if bot.cogs else 'Tidak ada'
-    embed = discord.Embed(
-        title="📦 Active Modules (Cogs)",
-        description=f"**{loaded}**",
-        color=0x00E5FF
-    )
-    embed.set_footer(text=f"Diminta oleh {ctx.author.name}", icon_url=ctx.author.display_avatar.url)
-    await ctx.send(embed=embed)
-
-
-@bot.command(name='ping', help='Cek latensi bot')
-async def ping(ctx: commands.Context):
-    import time
-
-    ws_latency = round(bot.latency * 1000)
-
-    # Ukur round-trip: waktu dari kirim pesan sampai Discord konfirmasi
-    start = time.perf_counter()
-    msg = await ctx.send("🏓 Mengukur...")
-    roundtrip = round((time.perf_counter() - start) * 1000)
-
-    # Warna berdasarkan round-trip
-    if roundtrip < 100:
-        color = 0x2ecc71   # hijau
-        status = "🟢 Sangat baik"
-    elif roundtrip < 200:
-        color = 0xf1c40f   # kuning
-        status = "🟡 Baik"
-    elif roundtrip < 400:
-        color = 0xe67e22   # oranye
-        status = "🟠 Sedang"
-    else:
-        color = 0xe74c3c   # merah
-        status = "🔴 Lambat"
-
-    embed = discord.Embed(title="🏓 Pong!", color=color)
-    embed.add_field(name="📡 WebSocket",  value=f"`{ws_latency}ms`",  inline=True)
-    embed.add_field(name="↩️ Round-trip", value=f"`{roundtrip}ms`",   inline=True)
-    embed.add_field(name="📊 Status",     value=status,               inline=True)
-    embed.set_footer(text=f"Diminta oleh {ctx.author.name}", icon_url=ctx.author.display_avatar.url)
-
-    await msg.edit(content=None, embed=embed)
- 
- 
+bot = Jarvis() 
 async def main():
     if not TOKEN:
         print("[Error] DISCORD_TOKEN tidak ditemukan di file .env")
