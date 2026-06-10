@@ -1,6 +1,5 @@
 import os
 import io
-import asyncio
 import aiohttp
 import discord
 from discord.ext import commands
