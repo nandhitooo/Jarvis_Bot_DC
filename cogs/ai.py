@@ -15,6 +15,7 @@ class AI(commands.Cog):
         self.bot = bot
         self.client    = None
         self.available = False
+        self.memory    = {} # user_id -> list of messages
 
         # ── Cek apakah pakai Jarvis Custom API atau langsung Groq ──
         self.jarvis_api_url = os.getenv("JARVIS_API_URL")   # e.g. http://localhost:8000
@@ -69,7 +70,7 @@ class AI(commands.Cog):
     # ────────────────────────────────────────────────────────────
     # Command: !jarvis ask
     # ────────────────────────────────────────────────────────────
-    @commands.command(name='ask', aliases=['chat', 'ai'], help='Tanyakan sesuatu ke Jarvis AI (via Groq)')
+    @commands.command(name='ask', aliases=['chat', 'ai'], help='Tanyakan sesuatu ke Jarvis AI (dengan memori)')
     async def ask(self, ctx: commands.Context, *, question: str):
         if not self.available:
             return await ctx.send(embed=discord.Embed(
@@ -77,12 +78,24 @@ class AI(commands.Cog):
                 color=0xFF3333
             ))
 
+        user_id = ctx.author.id
+        if user_id not in self.memory:
+            self.memory[user_id] = []
+        
+        # Keep last 10 messages for context
+        self.memory[user_id].append({"role": "user", "content": question})
+        if len(self.memory[user_id]) > 10:
+            self.memory[user_id] = self.memory[user_id][-10:]
+
         async with ctx.typing():
             try:
                 now_str, sys_instruction = self._build_sys()
-                answer, used_model = await self._query(sys_instruction, now_str, question)
+                answer, used_model = await self._query(sys_instruction, now_str, self.memory[user_id])
+                
                 if not answer or not answer.strip():
                     answer = "Maaf, saya tidak bisa memberikan jawaban untuk pertanyaan itu."
+                
+                self.memory[user_id].append({"role": "assistant", "content": answer})
                 await self._send_response(ctx, answer, used_model)
             except Exception as e:
                 print(f"[AI] Error: {e}")
@@ -90,6 +103,16 @@ class AI(commands.Cog):
                     description=self._friendly_error(str(e)),
                     color=0xFF3333
                 ))
+
+    @commands.command(name='clearchat', aliases=['resetchat'], help='Hapus memori chat kamu dengan Jarvis')
+    async def clear_chat(self, ctx: commands.Context):
+        user_id = ctx.author.id
+        if user_id in self.memory:
+            del self.memory[user_id]
+        await ctx.send(embed=discord.Embed(
+            description="🧹 Memori chat kamu telah dihapus, Boss.",
+            color=0x00E5FF
+        ))
 
     # ────────────────────────────────────────────────────────────
     # Command: !jarvis summarize
@@ -169,7 +192,7 @@ class AI(commands.Cog):
                     f"--- ISI DOKUMEN ---\n{text}\n--- AKHIR DOKUMEN ---"
                 )
 
-                answer, used_model = await self._query(sys_instruction, "", prompt, max_tokens=1500)
+                answer, used_model = await self._query(sys_instruction, "", [{"role": "user", "content": prompt}], max_tokens=1500)
                 await status_msg.delete()
 
                 filename = attachment.filename if attachment else url.split('/')[-1]
@@ -211,7 +234,7 @@ class AI(commands.Cog):
                     "Jika kamu tidak tahu jawabannya, katakan dengan jujur bahwa kamu tidak tahu."
                 )
                 enriched_query = f"{query}\n\n[Context: {now_str}]"
-                answer, used_model = await self._query(sys_instruction + "\n" + search_prompt, now_str, enriched_query)
+                answer, used_model = await self._query(sys_instruction + "\n" + search_prompt, now_str, [{"role": "user", "content": enriched_query}])
                 if not answer or not answer.strip():
                     answer = "Maaf, saya tidak bisa menemukan informasi yang relevan untuk pertanyaan itu."
                 await self._send_response(ctx, answer, used_model)
@@ -347,18 +370,16 @@ class AI(commands.Cog):
     # ────────────────────────────────────────────────────────────
     # Internal: query — otomatis pilih Jarvis API atau Groq direct
     # ────────────────────────────────────────────────────────────
-    async def _query(self, sys_instruction: str, now_str: str, question: str, max_tokens: int = 1000):
-        enriched = f"[Context: {now_str}]\n{question}" if now_str else question
-
+    async def _query(self, sys_instruction: str, now_str: str, messages: list[dict], max_tokens: int = 1000):
         if self.jarvis_api_url:
-            return await self._query_jarvis_api(enriched, sys_instruction, max_tokens)
+            return await self._query_jarvis_api(messages, sys_instruction, max_tokens)
         else:
-            return await self._query_groq_direct(enriched, sys_instruction, max_tokens)
+            return await self._query_groq_direct(messages, sys_instruction, max_tokens)
 
-    async def _query_jarvis_api(self, message: str, system: str, max_tokens: int):
+    async def _query_jarvis_api(self, messages: list[dict], system: str, max_tokens: int):
         """Kirim request ke Jarvis Custom API (api_server.py)."""
         payload = {
-            "message":       message,
+            "messages":      messages,
             "system_prompt": system,
             "provider":      "auto",
             "max_tokens":    max_tokens,
@@ -386,18 +407,16 @@ class AI(commands.Cog):
                 model_label = f"{data['provider'].capitalize()} — {data['model']} ({data['latency_ms']}ms)"
                 return data["answer"], model_label
 
-    async def _query_groq_direct(self, message: str, system: str, max_tokens: int):
+    async def _query_groq_direct(self, messages: list[dict], system: str, max_tokens: int):
         """Fallback: query langsung ke Groq tanpa custom API."""
         last_error = None
+        full_messages = [{"role": "system", "content": system}] + messages
         for model_id, model_label in self.models:
             try:
                 print(f"[AI] Trying Groq model: {model_id}")
                 response = await self.client.chat.completions.create(
                     model=model_id,
-                    messages=[
-                        {"role": "system", "content": system},
-                        {"role": "user",   "content": message},
-                    ],
+                    messages=full_messages,
                     max_tokens=max_tokens,
                     temperature=0.7,
                 )

@@ -70,91 +70,166 @@ class Jarvis(commands.Bot):
         await self.process_commands(message)
  
     async def _send_help_menu(self, ctx: commands.Context):
-        now = __import__('datetime').datetime.now().strftime('%H:%M')
+        view = HelpView(ctx, self)
+        await view.send_initial_help()
+
+class HelpView(discord.ui.View):
+    def __init__(self, ctx: commands.Context, bot: commands.Bot):
+        super().__init__(timeout=60)
+        self.ctx = ctx
+        self.bot = bot
+        self.current_category = "Main"
+
+    async def send_initial_help(self):
+        embed = self._get_main_embed()
+        await self.ctx.send(embed=embed, view=self)
+
+    def _get_main_embed(self):
+        now = datetime.datetime.now().strftime('%H:%M')
         embed = discord.Embed(
             title="",
             description=(
                 f"### 🤖 Jarvis — Personal AI Assistant\n"
-                f"Siap melayani, **{ctx.author.display_name}**. Pukul {now} — ada yang bisa saya bantu?"
+                f"Siap melayani, **{self.ctx.author.display_name}**. Pukul {now} — ada yang bisa saya bantu?\n\n"
+                "Silakan pilih kategori di bawah untuk melihat daftar perintah."
             ),
             color=0x00E5FF,
         )
-        if self.user:
-            embed.set_author(name="Jarvis Bot", icon_url=self.user.display_avatar.url)
-            embed.set_thumbnail(url=self.user.display_avatar.url)
-
-        embed.add_field(
-            name="🎵 Musik",
-            value=(
-                "`!jarvis play <judul/link>` — Putar musik.\n"
-                "`!jarvis join` — Masuk ke voice channel kamu\n"
-                "`!jarvis stop` — Stop dan keluar dari voice\n"
-                "`!jarvis skip` — Lewati lagu sekarang\n"
-                "`!jarvis pause` / `!jarvis resume` — Kontrol playback\n"
-                "`!jarvis queue` — Lihat antrian lagu\n"
-                "`!jarvis np` — Lagu yang sedang diputar\n"
-                "`!jarvis ph` — Tampilkan playing history\n"
-                "`!jarvis volume <0-100>` — Atur volume\n"
-                "`!jarvis clear` — Hapus semua antrian\n"
-                "`!jarvis remove <nomor antrian>` — Hapus lagu dari antrian\n"
-            ),
-            inline=False,
-        )
-
-        embed.add_field(
-            name="🤖 AI & Asisten",
-            value=(
-                "`!jarvis ask <pertanyaan>` — Tanya ke AI\n"
-                "`!jarvis summarize <pdf>` — Ringkas file pdf\n"
-                "`!jarvis search <query>` — Cari di web\n"
-                "`!jarvis image <deskripsi>` — Buat gambar AI\n"
-                "`!jarvis model` — Lihat daftar model AI yang tersedia\n"
-            ),
-            inline=False,
-        )
-
-        embed.add_field(
-            name="⚙️ Moderator",
-            value=(
-                "`!jarvis kick <@user> [alasan]` — Kick user\n"
-                "`!jarvis ban <@user> [alasan]` — Ban user\n"
-                "`!jarvis unban <@user>` — Unban user\n"
-                "`!jarvis timeout <@user> <menit> [alasan]` — Timeout user\n"
-                "`!jarvis untimeout <@user>` — Untimeout user\n"
-                "`!jarvis mute <@user> [alasan]` — Mute user\n"
-                "`!jarvis unmute <@user>` — Unmute user\n"
-                "`!jarvis clear <jumlah>` — Hapus pesan\n"
-                "`!jarvis warn <@user> [alasan]` — Warn user\n"
-                "`!jarvis warnings <@user>` — Lihat warn user\n"
-                "`!jarvis clearwarns <@user>` — Hapus semua warn user\n"
-                "`!jarvis slowmode <detik>` — Set slowmode channel\n"
-                "`!jarvis lock` — Lock channel\n"
-                "`!jarvis unlock` — Unlock channel\n"
-            ),
-            inline=False,
-        )
-
-        embed.add_field(
-            name="🛠️ Utilitas",
-            value=(
-                "`!jarvis ping` — Cek latensi bot\n"
-                "`!jarvis info` — Lihat info bot\n"
-                "`!jarvis help` — Tampilkan menu bantuan\n"
-                "`!jarvis invite` — Dapatkan link invite bot\n"
-                "`!jarvis uptime` — Lihat berapa lama bot sudah online\n"
-                "`!jarvis stats` — Statistik penggunaan bot\n"
-                "`!jarvis userinfo <@user>` — Lihat informasi user\n"
-                "`!jarvis serverinfo` — Lihat informasi server\n"
-                "`!jarvis cogs` — Lihat cogs yang aktif\n"
-            ),
-            inline=False,
-        )
-
+        if self.bot.user:
+            embed.set_author(name="Jarvis Bot", icon_url=self.bot.user.display_avatar.url)
+            embed.set_thumbnail(url=self.bot.user.display_avatar.url)
+        
+        embed.add_field(name="🎵 Musik", value="Kontrol playback & antrian lagu", inline=True)
+        embed.add_field(name="🤖 AI & Asisten", value="Tanya AI, Ringkas PDF, Search", inline=True)
+        embed.add_field(name="⚙️ Moderator", value="Kelola member & channel", inline=True)
+        embed.add_field(name="🛠️ Utilitas", value="Info bot, stats, uptime", inline=True)
+        
         embed.set_footer(
-            text=f"Jarvis v2.0  •  Powered by Groq LPU  •  {ctx.author.display_name}",
-            icon_url=ctx.author.display_avatar.url
+            text=f"Jarvis v2.5  •  Pilih menu di bawah",
+            icon_url=self.ctx.author.display_avatar.url
         )
-        await ctx.send(embed=embed)
+        return embed
+
+    @discord.ui.select(
+        placeholder="Pilih Kategori Perintah...",
+        options=[
+            discord.SelectOption(label="Menu Utama", value="Main", emoji="🏠", description="Kembali ke halaman utama"),
+            discord.SelectOption(label="Musik", value="Music", emoji="🎵", description="Perintah untuk memutar musik"),
+            discord.SelectOption(label="AI & Asisten", value="AI", emoji="🤖", description="Fitur kecerdasan buatan"),
+            discord.SelectOption(label="Moderator", value="Mod", emoji="⚙️", description="Perintah manajemen server"),
+            discord.SelectOption(label="Utilitas", value="Util", emoji="🛠️", description="Informasi dan alat bantu"),
+        ]
+    )
+    async def select_callback(self, interaction: discord.Interaction, select: discord.ui.Select):
+        if interaction.user.id != self.ctx.author.id:
+            return await interaction.response.send_message("Hanya orang yang memanggil menu ini yang bisa menggunakannya, Boss.", ephemeral=True)
+        
+        self.current_category = select.values[0]
+        embed = None
+        
+        if self.current_category == "Main":
+            embed = self._get_main_embed()
+        elif self.current_category == "Music":
+            embed = self._get_music_embed()
+        elif self.current_category == "AI":
+            embed = self._get_ai_embed()
+        elif self.current_category == "Mod":
+            embed = self._get_mod_embed()
+        elif self.current_category == "Util":
+            embed = self._get_util_embed()
+            
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    def _get_music_embed(self):
+        embed = discord.Embed(title="🎵 Menu Musik", color=0x00E5FF)
+        embed.add_field(
+            name="Kontrol Dasar",
+            value=(
+                "`!j join` — Masuk ke voice channel\n"
+                "`!j play <link/judul>` — Putar lagu\n"
+                "`!j stop` — Berhenti & keluar\n"
+                "`!j pause` / `!j resume` — Jeda/Lanjut\n"
+                "`!j skip` — Lewati lagu\n"
+            ), inline=False
+        )
+        embed.add_field(
+            name="Antrian & Info",
+            value=(
+                "`!j queue` — Lihat daftar putar\n"
+                "`!j np` — Lagu sekarang\n"
+                "`!j ph` — Riwayat putar\n"
+                "`!j clear` — Hapus antrian\n"
+                "`!j remove <no>` — Hapus lagu tertentu\n"
+                "`!j volume <0-100>` — Atur volume\n"
+            ), inline=False
+        )
+        return embed
+
+    def _get_ai_embed(self):
+        embed = discord.Embed(title="🤖 AI & Asisten", color=0x00E5FF)
+        embed.add_field(
+            name="Kecerdasan Buatan",
+            value=(
+                "`!j ask <tanya>` — Ngobrol dengan Jarvis\n"
+                "`!j clearchat` — Hapus memori chat\n"
+                "`!j search <query>` — Cari info di web\n"
+                "`!j image <deskripsi>` — Generate gambar AI\n"
+                "`!j summarize <pdf>` — Ringkas dokumen\n"
+            ), inline=False
+        )
+        embed.add_field(
+            name="Asisten Pribadi",
+            value=(
+                "`!j remind <waktu> <tugas>` — Setel pengingat\n"
+                "`!j timer <waktu>` — Setel timer\n"
+                "`!j weather <kota>` — Cek cuaca\n"
+                "`!j calc <ekspresi>` — Kalkulator mat\n"
+                "`!j sysinfo` — Cek status sistem host\n"
+                "`!j model` — Lihat model yang aktif\n"
+            ), inline=False
+        )
+        return embed
+
+    def _get_mod_embed(self):
+        embed = discord.Embed(title="⚙️ Menu Moderator", color=0x00E5FF)
+        embed.add_field(
+            name="Sanksi",
+            value=(
+                "`!j kick <user>` | `!j ban <user>`\n"
+                "`!j timeout <user> <menit>`\n"
+                "`!j warn <user>` | `!j warnings <user>`\n"
+            ), inline=True
+        )
+        embed.add_field(
+            name="Channel",
+            value=(
+                "`!j clear <jumlah>` — Hapus pesan\n"
+                "`!j lock` / `!j unlock` — Kunci channel\n"
+                "`!j slowmode <detik>` — Set slowmode\n"
+            ), inline=True
+        )
+        return embed
+
+    def _get_util_embed(self):
+        embed = discord.Embed(title="🛠️ Menu Utilitas", color=0x00E5FF)
+        embed.add_field(
+            name="Bot Info",
+            value=(
+                "`!j ping` — Cek latensi\n"
+                "`!j uptime` — Waktu aktif\n"
+                "`!j stats` — Statistik bot\n"
+                "`!j info` — Tentang Jarvis\n"
+            ), inline=True
+        )
+        embed.add_field(
+            name="Server & User",
+            value=(
+                "`!j userinfo <user>`\n"
+                "`!j serverinfo` — Info server\n"
+                "`!j invite` — Link invite\n"
+            ), inline=True
+        )
+        return embed
 
     async def on_command_error(self, ctx: commands.Context, error):
         if isinstance(error, commands.CommandNotFound):

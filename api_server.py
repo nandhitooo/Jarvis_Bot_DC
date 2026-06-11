@@ -35,7 +35,8 @@ app.add_middleware(
 
 # ── Models ───────────────────────────────────────────────────
 class ChatRequest(BaseModel):
-    message: str
+    message: Optional[str] = None
+    messages: Optional[list[dict]] = None # List of {"role": "...", "content": "..."}
     system_prompt: Optional[str] = None
     provider: Optional[str] = None   # "groq" | "gemini" | "deepseek" | "auto"
     max_tokens: Optional[int] = 1000
@@ -69,7 +70,7 @@ def build_system_prompt(custom: Optional[str] = None) -> str:
 # Provider functions
 # ════════════════════════════════════════════════════════════
 
-async def query_groq(message: str, system: str, max_tokens: int, temperature: float) -> dict:
+async def query_groq(messages: list[dict], system: str, max_tokens: int, temperature: float) -> dict:
     if not GROQ_KEY:
         raise Exception("GROQ_API_KEY not configured")
     from openai import AsyncOpenAI
@@ -79,15 +80,16 @@ async def query_groq(message: str, system: str, max_tokens: int, temperature: fl
         ("llama-3.1-8b-instant",    "Llama 3.1 8B"),
         ("gemma2-9b-it",            "Gemma 2 9B"),
     ]
+    
+    # Prepend system prompt if not present
+    full_messages = [{"role": "system", "content": system}] + messages
+    
     last_err = None
     for model_id, model_label in models:
         try:
             resp = await client.chat.completions.create(
                 model=model_id,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user",   "content": message},
-                ],
+                messages=full_messages,
                 max_tokens=max_tokens,
                 temperature=temperature,
             )
@@ -98,23 +100,28 @@ async def query_groq(message: str, system: str, max_tokens: int, temperature: fl
     raise last_err or Exception("All Groq models failed")
 
 
-async def query_gemini(message: str, system: str, max_tokens: int, temperature: float) -> dict:
+async def query_gemini(messages: list[dict], system: str, max_tokens: int, temperature: float) -> dict:
     if not GEMINI_KEY:
         raise Exception("GEMINI_API_KEY not configured")
     from google import genai
     from google.genai import types
     client = genai.Client(api_key=GEMINI_KEY)
     models = [
-        ("gemini-2.5-flash", "Gemini 2.5 Flash"),
         ("gemini-2.0-flash", "Gemini 2.0 Flash"),
+        ("gemini-1.5-flash", "Gemini 1.5 Flash"),
     ]
+    
+    # Gemini uses a different format, but we can simplify it for now
+    # Joining all content or just taking the last user message + history
+    prompt = "\n".join([f"{m['role']}: {m['content']}" for m in messages])
+
     last_err = None
     for model_id, model_label in models:
         try:
             def _call(mid=model_id):
                 return client.models.generate_content(
                     model=mid,
-                    contents=message,
+                    contents=prompt,
                     config=types.GenerateContentConfig(
                         system_instruction=system,
                         max_output_tokens=max_tokens,
@@ -128,17 +135,17 @@ async def query_gemini(message: str, system: str, max_tokens: int, temperature: 
     raise last_err or Exception("All Gemini models failed")
 
 
-async def query_deepseek(message: str, system: str, max_tokens: int, temperature: float) -> dict:
+async def query_deepseek(messages: list[dict], system: str, max_tokens: int, temperature: float) -> dict:
     if not DEEPSEEK_KEY:
         raise Exception("DEEPSEEK_API_KEY not configured")
     from openai import AsyncOpenAI
     client = AsyncOpenAI(api_key=DEEPSEEK_KEY, base_url="https://api.deepseek.com")
+    
+    full_messages = [{"role": "system", "content": system}] + messages
+    
     resp = await client.chat.completions.create(
         model="deepseek-chat",
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user",   "content": message},
-        ],
+        messages=full_messages,
         max_tokens=max_tokens,
         temperature=temperature,
     )
@@ -200,6 +207,14 @@ async def chat(req: ChatRequest, _: str = Depends(verify_key)):
     start   = time.perf_counter()
     errors  = {}
 
+    # Handle messages vs message
+    if req.messages:
+        messages = req.messages
+    elif req.message:
+        messages = [{"role": "user", "content": req.message}]
+    else:
+        raise HTTPException(400, "Either 'message' or 'messages' must be provided.")
+
     # Tentukan urutan provider yang akan dicoba
     if req.provider and req.provider != "auto":
         if req.provider not in PROVIDERS:
@@ -213,7 +228,7 @@ async def chat(req: ChatRequest, _: str = Depends(verify_key)):
         if not fn:
             continue
         try:
-            result   = await fn(req.message, system, req.max_tokens, req.temperature)
+            result   = await fn(messages, system, req.max_tokens, req.temperature)
             latency  = round((time.perf_counter() - start) * 1000)
             return ChatResponse(
                 answer     = result["answer"],
