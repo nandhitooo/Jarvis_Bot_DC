@@ -109,7 +109,7 @@ class Assistant(commands.Cog):
     @commands.command(name='calc', help='Kalkulator matematika')
     async def calc(self, ctx: commands.Context, *, expr: str):
         # Basic safety: allow only math characters
-        allowed = "0123456789+-*/(). "
+        allowed = "0123456789+-*/(). ^"
         if not all(c in allowed for c in expr):
             return await ctx.send("Ekspresi tidak valid! Hanya gunakan angka dan operator dasar.")
         
