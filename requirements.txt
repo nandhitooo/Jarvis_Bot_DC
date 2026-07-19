@@ -10,3 +10,4 @@ spotipy
 flask
 fastapi
 uvicorn
+psutil
