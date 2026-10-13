@@ -1,8 +1,13 @@
+"""Utility cog: bot info, latency, uptime, and server/user details."""
+
+import datetime
+import time
+
 import discord
 from discord.ext import commands
-import time
-import datetime
-from config import HONORIFIC
+
+from helpers import COLOR_DANGER, COLOR_INFO, COLOR_OK, COLOR_WARN
+
 
 class Utility(commands.Cog):
     def __init__(self, bot):
@@ -13,20 +18,20 @@ class Utility(commands.Cog):
         ws_latency = round(self.bot.latency * 1000)
 
         start = time.perf_counter()
-        msg = await ctx.send(f"🏓 Mengukur latensi, {HONORIFIC}...")
+        msg = await ctx.send("🏓 Mengukur latensi...")
         roundtrip = round((time.perf_counter() - start) * 1000)
 
         if roundtrip < 100:
-            color = 0x2ecc71   # hijau
+            color = COLOR_OK   # hijau
             status = "🟢 Sangat baik"
         elif roundtrip < 200:
-            color = 0xf1c40f   # kuning
+            color = COLOR_WARN   # kuning
             status = "🟡 Baik"
         elif roundtrip < 400:
             color = 0xe67e22   # oranye
             status = "🟠 Sedang"
         else:
-            color = 0xe74c3c   # merah
+            color = COLOR_DANGER   # merah
             status = "🔴 Lambat"
 
         embed = discord.Embed(title="🏓 Semua sistem responsif", color=color)
@@ -43,7 +48,7 @@ class Utility(commands.Cog):
         embed = discord.Embed(
             title="📦 Modul Aktif (Cogs)",
             description=f"**{loaded}**",
-            color=0x00E5FF
+            color=COLOR_INFO
         )
         embed.set_footer(text=f"Atas permintaan {ctx.author.name}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
@@ -52,8 +57,8 @@ class Utility(commands.Cog):
     async def info(self, ctx: commands.Context):
         embed = discord.Embed(
             title="🤖 Jarvis Bot",
-            description=f"Asisten serbaguna untuk berbagai kebutuhan server Anda, {HONORIFIC}.",
-            color=0x00E5FF
+            description="Asisten serbaguna buat berbagai kebutuhan server kamu.",
+            color=COLOR_INFO
         )
         embed.set_thumbnail(url=self.bot.user.display_avatar.url)
         embed.add_field(
@@ -69,8 +74,8 @@ class Utility(commands.Cog):
             value=(
                 f"**ID:** {self.bot.user.id}\n"
                 f"**Dibuat:** {self.bot.user.created_at.strftime('%Y-%m-%d %H:%M:%S')}\n"
-                f"**Created By:** @nandhitooo\n"
-                f"**Prefix:** `!jarvis` atau `!j`\n"
+                "**Created By:** @nandhitooo\n"
+                "**Prefix:** `!jarvis` atau `!j`\n"
             ),
             inline=False
         )
@@ -81,7 +86,7 @@ class Utility(commands.Cog):
         if hasattr(self.bot, '_send_help_menu'):
             await self.bot._send_help_menu(ctx)
         else:
-            await ctx.send(f"Mohon maaf, {HONORIFIC}, menu bantuan sedang tidak tersedia.")
+            await ctx.send("Menu bantuan lagi tidak tersedia ya.")
 
     @commands.command(name='invite', help='Dapatkan link invite bot')
     async def invite(self, ctx: commands.Context):
@@ -103,8 +108,8 @@ class Utility(commands.Cog):
         invite_link = discord.utils.oauth_url(self.bot.user.id, permissions=perms, scopes=("bot", "applications.commands"))
         embed = discord.Embed(
             title="📨 Invite Jarvis",
-            description=f"Klik [di sini]({invite_link}) untuk mengundang saya ke server Anda, {HONORIFIC}.",
-            color=0x00E5FF
+            description=f"Klik [di sini]({invite_link}) buat mengundang saya ke server kamu.",
+            color=COLOR_INFO
         )
         embed.set_footer(text=f"Atas permintaan {ctx.author.name}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
@@ -126,8 +131,8 @@ class Utility(commands.Cog):
 
         embed = discord.Embed(
             title="🕒 Waktu Aktif",
-            description=f"Saya sudah aktif selama **{', '.join(uptime_str) if uptime_str else '0 detik'}**, {HONORIFIC}.",
-            color=0x00E5FF
+            description=f"Saya sudah aktif selama **{', '.join(uptime_str) if uptime_str else '0 detik'}**.",
+            color=COLOR_INFO
         )
         embed.set_footer(text=f"Aktif sejak: {self.bot.start_time.strftime('%Y-%m-%d %H:%M:%S UTC')}")
         await ctx.send(embed=embed)
@@ -140,7 +145,7 @@ class Utility(commands.Cog):
 
         embed = discord.Embed(
             title="📊 Statistik Jarvis",
-            color=0x00E5FF
+            color=COLOR_INFO
         )
         embed.add_field(name="🌐 Servers", value=f"`{guild_count}`", inline=True)
         embed.add_field(name="👥 Users", value=f"`{user_count}`", inline=True)
@@ -175,7 +180,7 @@ class Utility(commands.Cog):
     async def serverinfo(self, ctx: commands.Context):
         guild = ctx.guild
         
-        embed = discord.Embed(title=f"🏰 Info Server — {guild.name}", color=0x00E5FF)
+        embed = discord.Embed(title=f"🏰 Info Server — {guild.name}", color=COLOR_INFO)
         if guild.icon:
             embed.set_thumbnail(url=guild.icon.url)
             

@@ -1,8 +1,12 @@
-import discord
-from discord.ext import commands
+"""Moderation cog: sanctions, channel controls, and warnings."""
+
 import asyncio
 from datetime import timedelta
-from config import HONORIFIC
+
+import discord
+from discord.ext import commands
+
+from helpers import COLOR_ERROR, COLOR_OK, COLOR_WARN, err, ok, warn
 
 
 class Moderation(commands.Cog):
@@ -13,16 +17,16 @@ class Moderation(commands.Cog):
     def _can_moderate(self, ctx: commands.Context, target: discord.Member) -> str | None:
         """Return error string jika tidak bisa moderasi, None jika bisa."""
         if target == ctx.author:
-            return "❌ Anda tidak dapat memoderasi diri sendiri."
+            return "❌ Kamu tidak bisa memoderasi diri sendiri."
         if target == ctx.guild.owner:
-            return "❌ Pemilik server tidak dapat dimoderasi."
+            return "❌ Pemilik server tidak bisa dimoderasi."
         if target.top_role >= ctx.author.top_role and ctx.author != ctx.guild.owner:
-            return "❌ Role Anda tidak cukup tinggi untuk memoderasi pengguna ini."
+            return "❌ Role kamu tidak cukup tinggi untuk memoderasi pengguna ini."
         if target.top_role >= ctx.guild.me.top_role:
             return "❌ Role bot tidak cukup tinggi untuk memoderasi pengguna ini."
         return None
 
-    def _mod_embed(self, title: str, desc: str, color: int = 0xFF3333) -> discord.Embed:
+    def _mod_embed(self, title: str, desc: str, color: int = COLOR_ERROR) -> discord.Embed:
         return discord.Embed(title=title, description=desc, color=color)
 
     # ────────────────────────────────────────────────────────────
@@ -37,7 +41,7 @@ class Moderation(commands.Cog):
             return await ctx.send(embed=self._mod_embed("❌ Gagal", err))
 
         await member.ban(reason=f"{reason} | Oleh: {ctx.author}")
-        embed = discord.Embed(title="🔨 Member Dibanned", color=0xFF3333)
+        embed = discord.Embed(title="🔨 Member Dibanned", color=COLOR_ERROR)
         embed.add_field(name="User",   value=f"{member} (`{member.id}`)", inline=False)
         embed.add_field(name="Alasan", value=reason, inline=False)
         embed.add_field(name="Oleh",   value=ctx.author.mention, inline=False)
@@ -51,7 +55,7 @@ class Moderation(commands.Cog):
         try:
             user = await self.bot.fetch_user(user_id)
             await ctx.guild.unban(user)
-            embed = discord.Embed(title="✅ Member Diunban", color=0x2ecc71)
+            embed = discord.Embed(title="✅ Member Diunban", color=COLOR_OK)
             embed.add_field(name="User", value=f"{user} (`{user.id}`)", inline=False)
             embed.add_field(name="Oleh", value=ctx.author.mention, inline=False)
             await ctx.send(embed=embed)
@@ -94,7 +98,7 @@ class Moderation(commands.Cog):
         until = discord.utils.utcnow() + timedelta(minutes=durasi)
         await member.timeout(until, reason=f"{reason} | Oleh: {ctx.author}")
 
-        embed = discord.Embed(title="🔇 Member Di-timeout", color=0xF1C40F)
+        embed = discord.Embed(title="🔇 Member Di-timeout", color=COLOR_WARN)
         embed.add_field(name="User",    value=f"{member} (`{member.id}`)", inline=False)
         embed.add_field(name="Durasi",  value=f"{durasi} menit", inline=True)
         embed.add_field(name="Berakhir", value=f"<t:{int(until.timestamp())}:R>", inline=True)
@@ -108,7 +112,7 @@ class Moderation(commands.Cog):
     @commands.has_permissions(moderate_members=True)
     async def untimeout(self, ctx: commands.Context, member: discord.Member):
         await member.timeout(None)
-        embed = discord.Embed(title="🔊 Timeout Dihapus", color=0x2ecc71)
+        embed = discord.Embed(title="🔊 Timeout Dihapus", color=COLOR_OK)
         embed.add_field(name="User", value=f"{member} (`{member.id}`)", inline=False)
         embed.add_field(name="Oleh", value=ctx.author.mention, inline=False)
         await ctx.send(embed=embed)
@@ -140,10 +144,9 @@ class Moderation(commands.Cog):
             deleted = await ctx.channel.purge(limit=jumlah, bulk=True)
             deleted_count = len(deleted)
 
-        msg = await ctx.send(embed=discord.Embed(
-            description=f"🗑️ **{deleted_count} pesan** telah dihapus oleh {ctx.author.mention}.",
-            color=0x2ecc71
-        ))
+        msg =            await ctx.send(embed=ok(
+                f"🗑️ **{deleted_count} pesan** sudah dihapus oleh {ctx.author.mention}."
+            ))
         await asyncio.sleep(4)
         await msg.delete()
 
@@ -166,7 +169,7 @@ class Moderation(commands.Cog):
         self.bot._warnings[key].append({"reason": reason, "by": str(ctx.author)})
         count = len(self.bot._warnings[key])
 
-        embed = discord.Embed(title="⚠️ Member Diperingatkan", color=0xF1C40F)
+        embed = discord.Embed(title="⚠️ Member Diperingatkan", color=COLOR_WARN)
         embed.add_field(name="User",        value=f"{member} (`{member.id}`)", inline=False)
         embed.add_field(name="Alasan",      value=reason, inline=False)
         embed.add_field(name="Total Warn",  value=f"**{count}x**", inline=True)
@@ -180,11 +183,10 @@ class Moderation(commands.Cog):
     async def warnings(self, ctx: commands.Context, member: discord.Member):
         warnings = getattr(self.bot, '_warnings', {}).get((ctx.guild.id, member.id), [])
         if not warnings:
-            return await ctx.send(embed=discord.Embed(
-                description=f"✅ {member.mention} tidak memiliki peringatan.",
-                color=0x2ecc71
+            return await ctx.send(embed=ok(
+                f"✅ {member.mention} tidak memiliki peringatan."
             ))
-        embed = discord.Embed(title=f"⚠️ Peringatan — {member.name}", color=0xF1C40F)
+        embed = discord.Embed(title=f"⚠️ Peringatan — {member.name}", color=COLOR_WARN)
         for i, w in enumerate(warnings, 1):
             embed.add_field(name=f"#{i}", value=f"**Alasan:** {w['reason']}\n**Oleh:** {w['by']}", inline=False)
         embed.set_thumbnail(url=member.display_avatar.url)
@@ -196,9 +198,8 @@ class Moderation(commands.Cog):
     async def clearwarns(self, ctx: commands.Context, member: discord.Member):
         if hasattr(self.bot, '_warnings'):
             self.bot._warnings.pop((ctx.guild.id, member.id), None)
-        await ctx.send(embed=discord.Embed(
-            description=f"✅ Semua peringatan {member.mention} telah dihapus.",
-            color=0x2ecc71
+        await ctx.send(embed=ok(
+            f"✅ Semua peringatan {member.mention} sudah dihapus."
         ))
 
     # ────────────────────────────────────────────────────────────
@@ -212,7 +213,7 @@ class Moderation(commands.Cog):
             return await ctx.send(embed=self._mod_embed("❌ Gagal", "Slowmode harus antara 0–21600 detik."))
         await ctx.channel.edit(slowmode_delay=detik)
         msg = "✅ Slowmode **dimatikan**." if detik == 0 else f"✅ Slowmode diatur ke **{detik} detik**."
-        await ctx.send(embed=discord.Embed(description=msg, color=0x2ecc71))
+        await ctx.send(embed=ok(msg))
 
     # ────────────────────────────────────────────────────────────
     # LOCK / UNLOCK channel
@@ -224,9 +225,8 @@ class Moderation(commands.Cog):
         overwrite = ctx.channel.overwrites_for(ctx.guild.default_role)
         overwrite.send_messages = False
         await ctx.channel.set_permissions(ctx.guild.default_role, overwrite=overwrite)
-        await ctx.send(embed=discord.Embed(
-            description=f"🔒 Channel **{ctx.channel.name}** dikunci oleh {ctx.author.mention}.",
-            color=0xFF3333
+        await ctx.send(embed=err(
+            f"🔒 Channel **{ctx.channel.name}** dikunci oleh {ctx.author.mention}."
         ))
 
     @commands.command(name='unlock', help='Buka kunci channel')
@@ -236,9 +236,8 @@ class Moderation(commands.Cog):
         overwrite = ctx.channel.overwrites_for(ctx.guild.default_role)
         overwrite.send_messages = None
         await ctx.channel.set_permissions(ctx.guild.default_role, overwrite=overwrite)
-        await ctx.send(embed=discord.Embed(
-            description=f"🔓 Channel **{ctx.channel.name}** dibuka oleh {ctx.author.mention}.",
-            color=0x2ecc71
+        await ctx.send(embed=ok(
+            f"🔓 Channel **{ctx.channel.name}** dibuka oleh {ctx.author.mention}."
         ))
 
     @commands.command(name='mute', help='Mute user')
@@ -252,9 +251,8 @@ class Moderation(commands.Cog):
         muted_role = discord.utils.get(ctx.guild.roles, name="Muted")
         if not muted_role:
             muted_role = await ctx.guild.create_role(name="Muted", permissions=discord.Permissions(send_messages=False))
-            await ctx.send(embed=discord.Embed(
-                description="Menyiapkan role Muted, mohon tunggu",
-                color=0xf1c40f
+            await ctx.send(embed=warn(
+                "Menyiapkan role Muted, tunggu sebentar ya"
             ))
             channels = list(ctx.guild.channels)
             for start in range(0, len(channels), 5):
@@ -264,7 +262,7 @@ class Moderation(commands.Cog):
                 ], return_exceptions=True)
 
         await member.add_roles(muted_role, reason=f"{reason} | Oleh: {ctx.author}")
-        embed = discord.Embed(title="🔇 Member Dimute", color=0xF1C40F)
+        embed = discord.Embed(title="🔇 Member Dimute", color=COLOR_WARN)
         embed.add_field(name="User",   value=f"{member} (`{member.id}`)", inline=False)
         embed.add_field(name="Alasan", value=reason, inline=False)
         embed.add_field(name="Oleh",   value=ctx.author.mention, inline=False)
@@ -278,7 +276,7 @@ class Moderation(commands.Cog):
         muted_role = discord.utils.get(ctx.guild.roles, name="Muted")
         if muted_role and muted_role in member.roles:
             await member.remove_roles(muted_role, reason=f"Oleh: {ctx.author}")
-            embed = discord.Embed(title="🔊 Member Diunmute", color=0x2ecc71)
+            embed = discord.Embed(title="🔊 Member Diunmute", color=COLOR_OK)
             embed.add_field(name="User", value=f"{member} (`{member.id}`)", inline=False)
             embed.add_field(name="Oleh", value=ctx.author.mention, inline=False)
             await ctx.send(embed=embed)
@@ -325,13 +323,13 @@ class Moderation(commands.Cog):
         elif isinstance(error, commands.MissingRequiredArgument):
             await ctx.send(embed=self._mod_embed(
                 "❌ Argumen Kurang",
-                f"Mohon maaf, {HONORIFIC}, argumen `{error.param.name}` masih diperlukan. Ketik `!jarvis` untuk bantuan."
+                f"Argumen `{error.param.name}` masih diperlukan. Ketik `!jarvis` untuk bantuan."
             ))
         elif isinstance(error, commands.BadArgument):
             await ctx.send(embed=self._mod_embed("❌ Argumen Salah", "Pastikan format perintah sudah benar."))
         else:
             print(f"[Mod] Error: {error}")
-            await ctx.send(embed=self._mod_embed("⚠️ Error", f"Terjadi kesalahan saat menjalankan perintah. Silakan coba lagi, {HONORIFIC}."))
+            await ctx.send(embed=self._mod_embed("⚠️ Error", "Ada yang tidak beres di sisi saya. Coba lagi sebentar lagi ya."))
 
 
 async def setup(bot):

@@ -1,14 +1,58 @@
-import discord
-from discord.ext import commands, tasks
-import datetime
+"""Assistant cog: reminders, timers, weather, calculator, and system info."""
+
+import ast
 import asyncio
-import aiohttp
-import psutil
+import datetime
 import platform
 import re
-import ast
 from urllib.parse import quote
+
+import aiohttp
+import discord
+import psutil
+from discord.ext import commands, tasks
+
 from config import HONORIFIC
+from helpers import COLOR_INFO, info
+
+
+def _safe_eval(node: ast.AST) -> int | float:
+    """Evaluate a restricted arithmetic AST (numbers and basic operators only)."""
+    if isinstance(node, ast.Expression):
+        return _safe_eval(node.body)
+    if isinstance(node, ast.Constant):
+        if isinstance(node.value, (int, float)):
+            return node.value
+        raise ValueError("konstanta tidak diizinkan")
+    if isinstance(node, ast.BinOp):
+        left = _safe_eval(node.left)
+        right = _safe_eval(node.right)
+        if isinstance(node.op, ast.Add):
+            return left + right
+        if isinstance(node.op, ast.Sub):
+            return left - right
+        if isinstance(node.op, ast.Mult):
+            return left * right
+        if isinstance(node.op, ast.Div):
+            return left / right
+        if isinstance(node.op, ast.FloorDiv):
+            return left // right
+        if isinstance(node.op, ast.Mod):
+            return left % right
+        if isinstance(node.op, ast.Pow):
+            if abs(right) > 100:
+                raise ValueError("eksponen terlalu besar")
+            return left ** right
+        raise ValueError("operator tidak diizinkan")
+    if isinstance(node, ast.UnaryOp):
+        operand = _safe_eval(node.operand)
+        if isinstance(node.op, ast.UAdd):
+            return +operand
+        if isinstance(node.op, ast.USub):
+            return -operand
+        raise ValueError("operator tidak diizinkan")
+    raise ValueError("ekspresi tidak diizinkan")
+
 
 class Assistant(commands.Cog):
     def __init__(self, bot):
@@ -42,13 +86,11 @@ class Assistant(commands.Cog):
                 except discord.HTTPException:
                     user = None
                 if user:
-                    embed = discord.Embed(
-                        title="⏰ Pengingat!",
-                        description=f"{HONORIFIC}, ini pengingat untuk: **{r['task']}**",
-                        color=0x00E5FF
-                    )
                     try:
-                        await user.send(embed=embed)
+                        await user.send(embed=info(
+                            f"Waktunya: **{r['task']}**, {HONORIFIC}.",
+                            title="⏰ Pengingat!",
+                        ))
                     except discord.HTTPException:
                         pass
                 to_remove.append(r)
@@ -65,7 +107,7 @@ class Assistant(commands.Cog):
         """Set a reminder. Time format: <number>[s|m|h|d]"""
         delta = self.parse_duration(time_str, ('s', 'm', 'h', 'd'))
         if delta is None or delta > datetime.timedelta(days=30):
-            return await ctx.send(f"Mohon maaf, {HONORIFIC}, format waktunya belum tepat. Gunakan `s` (detik), `m` (menit), `h` (jam), atau `d` (hari). Contoh: `10m`.")
+            return await ctx.send("Format waktunya belum tepat. Pakai `s` (detik), `m` (menit), `h` (jam), atau `d` (hari). Contoh: `10m`.")
 
         remind_time = datetime.datetime.now(datetime.timezone.utc) + delta
         self.reminders.append({
@@ -74,23 +116,21 @@ class Assistant(commands.Cog):
             'time': remind_time
         })
 
-        embed = discord.Embed(
-            description=f"✅ Dengan senang hati, {HONORIFIC}. Saya ingatkan kembali **{task}** dalam **{time_str}**.",
-            color=0x00E5FF
-        )
-        await ctx.send(embed=embed)
+        await ctx.send(embed=info(
+            f"✅ Oke, {HONORIFIC}. Saya ingatkan **{task}** dalam **{time_str}**."
+        ))
 
     @commands.command(name='timer', help='Setel timer (contoh: !j timer 5m)')
     async def timer(self, ctx: commands.Context, time_str: str):
         """Set a timer. Time format: <number>[s|m|h]"""
         delta = self.parse_duration(time_str, ('s', 'm', 'h'))
         if delta is None or delta > datetime.timedelta(hours=6):
-            return await ctx.send(f"Mohon maaf, {HONORIFIC}, format waktunya belum tepat. Gunakan `s`, `m`, atau `h`.")
+            return await ctx.send("Format waktunya belum tepat. Pakai `s`, `m`, atau `h`.")
 
         seconds = int(delta.total_seconds())
-        await ctx.send(f"⏲️ Timer berjalan, {HONORIFIC}: **{time_str}**")
+        await ctx.send(f"⏲️ Sip, {HONORIFIC}. Timer **{time_str}** jalan.")
         await asyncio.sleep(seconds)
-        await ctx.send(f"🔔 {ctx.author.mention}, waktu yang ditentukan telah habis. (**{time_str}**)")
+        await ctx.send(f"🔔 {ctx.author.mention}, waktunya habis! (**{time_str}**)")
 
     @commands.command(name='weather', help='Cek cuaca di suatu kota')
     async def weather(self, ctx: commands.Context, *, city: str):
@@ -101,7 +141,7 @@ class Assistant(commands.Cog):
                 async with aiohttp.ClientSession(timeout=timeout) as session:
                     async with session.get(url) as resp:
                         if resp.status != 200:
-                            return await ctx.send(f"Mohon maaf, {HONORIFIC}, data cuaca tidak dapat saya ambil. Pastikan nama kota sudah benar.")
+                            return await ctx.send("Data cuaca tidak bisa saya ambil. Pastikan nama kotanya benar.")
                         data = await resp.json()
 
                 current = data['current_condition'][0]
@@ -110,7 +150,7 @@ class Assistant(commands.Cog):
                 hum = current['humidity']
                 wind = current['windspeedKmph']
 
-                embed = discord.Embed(title=f"🌡️ Laporan Cuaca — {city.title()}", color=0x00E5FF)
+                embed = discord.Embed(title=f"🌡️ Laporan Cuaca — {city.title()}", color=COLOR_INFO)
                 embed.add_field(name="Suhu", value=f"{temp}°C", inline=True)
                 embed.add_field(name="Kondisi", value=desc, inline=True)
                 embed.add_field(name="Kelembapan", value=f"{hum}%", inline=True)
@@ -118,64 +158,26 @@ class Assistant(commands.Cog):
                 embed.set_footer(text="Data provided by wttr.in")
                 await ctx.send(embed=embed)
             except (aiohttp.ClientError, asyncio.TimeoutError, KeyError, IndexError, ValueError):
-                await ctx.send(f"Mohon maaf, {HONORIFIC}, data cuaca tidak dapat saya ambil. Pastikan nama kota sudah benar, lalu coba lagi.")
+                await ctx.send("Data cuaca tidak bisa saya ambil. Pastikan nama kotanya benar, lalu coba lagi.")
 
     @commands.command(name='calc', help='Kalkulator matematika')
     async def calc(self, ctx: commands.Context, *, expr: str):
-        def _eval(node):
-            if isinstance(node, ast.Expression):
-                return _eval(node.body)
-            if isinstance(node, ast.Constant):
-                if isinstance(node.value, (int, float)):
-                    return node.value
-                raise ValueError("konstanta tidak diizinkan")
-            if isinstance(node, ast.BinOp):
-                left = _eval(node.left)
-                right = _eval(node.right)
-                if isinstance(node.op, ast.Add):
-                    return left + right
-                if isinstance(node.op, ast.Sub):
-                    return left - right
-                if isinstance(node.op, ast.Mult):
-                    return left * right
-                if isinstance(node.op, ast.Div):
-                    return left / right
-                if isinstance(node.op, ast.FloorDiv):
-                    return left // right
-                if isinstance(node.op, ast.Mod):
-                    return left % right
-                if isinstance(node.op, ast.Pow):
-                    if abs(right) > 100:
-                        raise ValueError("eksponen terlalu besar")
-                    return left ** right
-                raise ValueError("operator tidak diizinkan")
-            if isinstance(node, ast.UnaryOp):
-                operand = _eval(node.operand)
-                if isinstance(node.op, ast.UAdd):
-                    return +operand
-                if isinstance(node.op, ast.USub):
-                    return -operand
-                raise ValueError("operator tidak diizinkan")
-            raise ValueError("ekspresi tidak diizinkan")
-
         expr_clean = expr.replace('^', '**').strip()
         if len(expr_clean) > 100:
-            return await ctx.send(f"Mohon maaf, {HONORIFIC}, ekspresi itu terlalu panjang — maksimal 100 karakter.")
+            return await ctx.send("Ekspresinya kepanjangan — maksimal 100 karakter.")
 
         try:
             tree = ast.parse(expr_clean, mode='eval')
-            result = _eval(tree)
+            result = _safe_eval(tree)
         except ZeroDivisionError:
-            return await ctx.send(f"Mohon maaf, {HONORIFIC}, pembagian dengan nol tidak diperbolehkan.")
+            return await ctx.send("Tidak bisa dibagi nol.")
         except Exception:
-            return await ctx.send(f"Mohon maaf, {HONORIFIC}, ekspresi itu tidak valid. Gunakan hanya angka dan operator dasar.")
+            return await ctx.send("Ekspresinya tidak valid. Pakai angka dan operator dasar saja.")
 
-        embed = discord.Embed(
+        await ctx.send(embed=info(
+            f"**Input:** `{expr}`\n**Hasil:** `{result}`",
             title="🔢 Kalkulator",
-            description=f"**Input:** `{expr}`\n**Hasil:** `{result}`",
-            color=0x00E5FF
-        )
-        await ctx.send(embed=embed)
+        ))
 
     @commands.command(name='sysinfo', help='Lihat statistik sistem host bot')
     @commands.is_owner()
@@ -184,7 +186,7 @@ class Assistant(commands.Cog):
         ram = psutil.virtual_memory()
         disk = psutil.disk_usage('/')
         
-        embed = discord.Embed(title="🖥️ Status Sistem", color=0x00E5FF)
+        embed = discord.Embed(title="🖥️ Status Sistem", color=COLOR_INFO)
         embed.add_field(name="OS", value=f"{platform.system()} {platform.release()}", inline=False)
         embed.add_field(name="CPU Usage", value=f"{cpu_usage}%", inline=True)
         embed.add_field(name="RAM Usage", value=f"{ram.percent}% ({round(ram.used / (1024**3), 2)} GB / {round(ram.total / (1024**3), 2)} GB)", inline=False)

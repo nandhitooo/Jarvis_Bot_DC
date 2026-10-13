@@ -1,14 +1,49 @@
+"""Jarvis bot entrypoint: client setup, cog loading, help menu, and global error handling."""
+
+import asyncio
+import datetime
 import os
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
-import asyncio
-import datetime
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
 from config import HONORIFIC, TIMEZONE
+from helpers import COLOR_INFO, err, warn
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
+
+def _embed_for_error(error) -> discord.Embed | None:
+    """Map a command error to its user-facing embed, or None when there is no dedicated message."""
+    if isinstance(error, commands.MissingRequiredArgument):
+        return err(
+            f"Parameter **`{error.param.name}`** masih dibutuhkan. Ketik `!jarvis` untuk lihat daftar perintah.",
+            title="❌ Argumen Kurang",
+        )
+    if isinstance(error, commands.BadArgument):
+        return err(
+            "Argumennya kurang pas. Ketik `!jarvis` untuk lihat contohnya.",
+            title="❌ Format Tidak Valid",
+        )
+    if isinstance(error, commands.CommandOnCooldown):
+        return warn(
+            f"Tunggu {error.retry_after:.0f} detik lagi ya.",
+            title="⏳ Tunggu Sebentar",
+        )
+    if isinstance(error, commands.NoPrivateMessage):
+        return err(
+            "Perintah ini cuma bisa dipakai di server.",
+            title="❌ Hanya di Server",
+        )
+    if isinstance(error, (commands.NotOwner, commands.CheckFailure)):
+        return err(
+            "Kamu tidak punya izin untuk perintah ini.",
+            title="❌ Akses Ditolak",
+        )
+    return None
+
 
 class Jarvis(commands.Bot):
     def __init__(self):
@@ -83,45 +118,8 @@ class Jarvis(commands.Bot):
             return
         if isinstance(error, commands.CommandNotFound):
             return  # Abaikan perintah yang tidak dikenal
-        if isinstance(error, commands.MissingRequiredArgument):
-            embed = discord.Embed(
-                title="❌ Argumen Kurang",
-                description=f"Mohon maaf, {HONORIFIC}, parameter **`{error.param.name}`** masih dibutuhkan. Ketik `!jarvis` untuk melihat daftar perintah.",
-                color=0xff3333
-            )
-            await ctx.send(embed=embed)
-            return
-        if isinstance(error, commands.BadArgument):
-            embed = discord.Embed(
-                title="❌ Format Tidak Valid",
-                description=f"Mohon maaf, {HONORIFIC}, argumen yang diberikan tidak sesuai format. Ketik `!jarvis` untuk melihat contoh penggunaan.",
-                color=0xff3333
-            )
-            await ctx.send(embed=embed)
-            return
-        if isinstance(error, commands.CommandOnCooldown):
-            embed = discord.Embed(
-                title="⏳ Tunggu Sebentar",
-                description=f"Mohon bersabar, {HONORIFIC} — tunggu {error.retry_after:.0f} detik.",
-                color=0xf1c40f
-            )
-            await ctx.send(embed=embed)
-            return
-        if isinstance(error, commands.NoPrivateMessage):
-            embed = discord.Embed(
-                title="❌ Hanya di Server",
-                description="Perintah ini hanya dapat dijalankan di dalam server.",
-                color=0xff3333
-            )
-            await ctx.send(embed=embed)
-            return
-
-        if isinstance(error, (commands.NotOwner, commands.CheckFailure)):
-            embed = discord.Embed(
-                title="❌ Akses Ditolak",
-                description=f"Mohon maaf, {HONORIFIC}, Anda tidak memiliki izin untuk perintah ini.",
-                color=0xff3333
-            )
+        embed = _embed_for_error(error)
+        if embed is not None:
             await ctx.send(embed=embed)
             return
 
@@ -130,12 +128,10 @@ class Jarvis(commands.Bot):
             print(f"[Error] Command '{ctx.command}': {error.original}")
         else:
             print(f"[Error] Command '{ctx.command}': {error}")
-        embed = discord.Embed(
-            title="⚠️ Terjadi Kesalahan",
-            description=f"Ada yang berjalan tidak semestinya, {HONORIFIC}. Silakan coba lagi.",
-            color=0xf1c40f
-        )
-        await ctx.send(embed=embed)
+        await ctx.send(embed=warn(
+            "Ada yang tidak beres di sisi saya. Coba lagi sebentar lagi ya.",
+            title="⚠️ Terjadi Kesalahan"
+        ))
 
 class HelpView(discord.ui.View):
     def __init__(self, ctx: commands.Context, bot: commands.Bot):
@@ -164,11 +160,11 @@ class HelpView(discord.ui.View):
         embed = discord.Embed(
             title="",
             description=(
-                f"### 🤖 Jarvis — Asisten AI Pribadi\n"
-                f"Dengan senang hati, **{self.ctx.author.display_name}**. Sekarang pukul {now} — ada yang bisa saya bantu?\n\n"
-                f"Silakan pilih kategori di bawah ini, {HONORIFIC}."
+                "### 🤖 Jarvis — Asisten AI Pribadi\n"
+                f"Hai **{self.ctx.author.display_name}**! Sekarang pukul {now} — ada yang bisa saya bantu?\n\n"
+                f"Pilih kategorinya di bawah ini, {HONORIFIC}."
             ),
-            color=0x00E5FF,
+            color=COLOR_INFO,
         )
         if self.bot.user:
             embed.set_author(name="Jarvis Bot", icon_url=self.bot.user.display_avatar.url)
@@ -180,13 +176,13 @@ class HelpView(discord.ui.View):
         embed.add_field(name="🛠️ Utilitas", value="Info bot, statistik, waktu aktif", inline=True)
         
         embed.set_footer(
-            text="Jarvis v2.5  •  Silakan pilih menu di bawah",
+            text="Jarvis v2.5  •  Pilih menu di bawah",
             icon_url=self.ctx.author.display_avatar.url
         )
         return embed
 
     @discord.ui.select(
-        placeholder="Silakan pilih kategori perintah...",
+        placeholder="Pilih kategori perintah...",
         options=[
             discord.SelectOption(label="Menu Utama", value="Main", emoji="🏠", description="Kembali ke halaman utama"),
             discord.SelectOption(label="Musik", value="Music", emoji="🎵", description="Perintah pemutaran musik"),
@@ -197,7 +193,7 @@ class HelpView(discord.ui.View):
     )
     async def select_callback(self, interaction: discord.Interaction, select: discord.ui.Select):
         if interaction.user.id != self.ctx.author.id:
-            return await interaction.response.send_message(f"Mohon maaf, hanya pemanggil menu ini yang dapat menggunakannya, {HONORIFIC}.", ephemeral=True)
+            return await interaction.response.send_message("Hanya pemanggil menu ini yang bisa memakainya.", ephemeral=True)
         
         self.current_category = select.values[0]
         embed = None
@@ -216,7 +212,7 @@ class HelpView(discord.ui.View):
         await interaction.response.edit_message(embed=embed, view=self)
 
     def _get_music_embed(self):
-        embed = discord.Embed(title="🎵 Menu Musik", color=0x00E5FF)
+        embed = discord.Embed(title="🎵 Menu Musik", color=COLOR_INFO)
         embed.add_field(
             name="Kontrol Dasar",
             value=(
@@ -241,7 +237,7 @@ class HelpView(discord.ui.View):
         return embed
 
     def _get_ai_embed(self):
-        embed = discord.Embed(title="🤖 AI & Asisten", color=0x00E5FF)
+        embed = discord.Embed(title="🤖 AI & Asisten", color=COLOR_INFO)
         embed.add_field(
             name="Kecerdasan Buatan",
             value=(
@@ -265,7 +261,7 @@ class HelpView(discord.ui.View):
         return embed
 
     def _get_mod_embed(self):
-        embed = discord.Embed(title="⚙️ Menu Moderator", color=0x00E5FF)
+        embed = discord.Embed(title="⚙️ Menu Moderator", color=COLOR_INFO)
         embed.add_field(
             name="Sanksi",
             value=(
@@ -285,7 +281,7 @@ class HelpView(discord.ui.View):
         return embed
 
     def _get_util_embed(self):
-        embed = discord.Embed(title="🛠️ Menu Utilitas", color=0x00E5FF)
+        embed = discord.Embed(title="🛠️ Menu Utilitas", color=COLOR_INFO)
         embed.add_field(
             name="Bot Info",
             value=(
