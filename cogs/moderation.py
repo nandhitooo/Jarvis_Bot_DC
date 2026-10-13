@@ -2,9 +2,7 @@ import discord
 from discord.ext import commands
 import asyncio
 from datetime import timedelta
-
-# Sapaan tetap untuk seluruh pesan pengguna
-HONORIFIC = "Boss"
+from config import HONORIFIC
 
 
 class Moderation(commands.Cog):
@@ -213,7 +211,7 @@ class Moderation(commands.Cog):
         if detik < 0 or detik > 21600:
             return await ctx.send(embed=self._mod_embed("❌ Gagal", "Slowmode harus antara 0–21600 detik."))
         await ctx.channel.edit(slowmode_delay=detik)
-        msg = f"✅ Slowmode **dimatikan**." if detik == 0 else f"✅ Slowmode diatur ke **{detik} detik**."
+        msg = "✅ Slowmode **dimatikan**." if detik == 0 else f"✅ Slowmode diatur ke **{detik} detik**."
         await ctx.send(embed=discord.Embed(description=msg, color=0x2ecc71))
 
     # ────────────────────────────────────────────────────────────
@@ -254,8 +252,16 @@ class Moderation(commands.Cog):
         muted_role = discord.utils.get(ctx.guild.roles, name="Muted")
         if not muted_role:
             muted_role = await ctx.guild.create_role(name="Muted", permissions=discord.Permissions(send_messages=False))
-            for channel in ctx.guild.channels:
-                await channel.set_permissions(muted_role, send_messages=False)
+            await ctx.send(embed=discord.Embed(
+                description="Menyiapkan role Muted, mohon tunggu",
+                color=0xf1c40f
+            ))
+            channels = list(ctx.guild.channels)
+            for start in range(0, len(channels), 5):
+                await asyncio.gather(*[
+                    channel.set_permissions(muted_role, send_messages=False)
+                    for channel in channels[start:start + 5]
+                ], return_exceptions=True)
 
         await member.add_roles(muted_role, reason=f"{reason} | Oleh: {ctx.author}")
         embed = discord.Embed(title="🔇 Member Dimute", color=0xF1C40F)

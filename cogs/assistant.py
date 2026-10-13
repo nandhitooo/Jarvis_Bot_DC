@@ -4,14 +4,11 @@ import datetime
 import asyncio
 import aiohttp
 import psutil
-import os
 import platform
 import re
 import ast
 from urllib.parse import quote
-
-# Sapaan tetap untuk seluruh pesan pengguna
-HONORIFIC = "Boss"
+from config import HONORIFIC
 
 class Assistant(commands.Cog):
     def __init__(self, bot):
@@ -91,7 +88,7 @@ class Assistant(commands.Cog):
             return await ctx.send(f"Mohon maaf, {HONORIFIC}, format waktunya belum tepat. Gunakan `s`, `m`, atau `h`.")
 
         seconds = int(delta.total_seconds())
-        msg = await ctx.send(f"⏲️ Timer berjalan, {HONORIFIC}: **{time_str}**")
+        await ctx.send(f"⏲️ Timer berjalan, {HONORIFIC}: **{time_str}**")
         await asyncio.sleep(seconds)
         await ctx.send(f"🔔 {ctx.author.mention}, waktu yang ditentukan telah habis. (**{time_str}**)")
 

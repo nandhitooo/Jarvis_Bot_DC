@@ -4,12 +4,11 @@ from discord.ext import commands
 from dotenv import load_dotenv
 import asyncio
 import datetime
- 
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from config import HONORIFIC, TIMEZONE
+
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
-
-# Sapaan tetap untuk seluruh pesan pengguna
-HONORIFIC = "Boss"
 
 class Jarvis(commands.Bot):
     def __init__(self):
@@ -147,10 +146,21 @@ class HelpView(discord.ui.View):
 
     async def send_initial_help(self):
         embed = self._get_main_embed()
-        await self.ctx.send(embed=embed, view=self)
+        self.message = await self.ctx.send(embed=embed, view=self)
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+        try:
+            await self.message.edit(view=self)
+        except discord.HTTPException:
+            pass
 
     def _get_main_embed(self):
-        now = datetime.datetime.now().strftime('%H:%M')
+        try:
+            now = datetime.datetime.now(ZoneInfo(TIMEZONE)).strftime('%H:%M')
+        except ZoneInfoNotFoundError:
+            now = datetime.datetime.now().strftime('%H:%M')
         embed = discord.Embed(
             title="",
             description=(
@@ -170,7 +180,7 @@ class HelpView(discord.ui.View):
         embed.add_field(name="🛠️ Utilitas", value="Info bot, statistik, waktu aktif", inline=True)
         
         embed.set_footer(
-            text=f"Jarvis v2.5  •  Silakan pilih menu di bawah",
+            text="Jarvis v2.5  •  Silakan pilih menu di bawah",
             icon_url=self.ctx.author.display_avatar.url
         )
         return embed

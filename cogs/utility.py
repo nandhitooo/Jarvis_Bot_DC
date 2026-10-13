@@ -2,9 +2,7 @@ import discord
 from discord.ext import commands
 import time
 import datetime
-
-# Sapaan tetap untuk seluruh pesan pengguna
-HONORIFIC = "Boss"
+from config import HONORIFIC
 
 class Utility(commands.Cog):
     def __init__(self, bot):

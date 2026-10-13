@@ -111,6 +111,8 @@ GROQ_MODEL_3=gemma2-9b-it
 GROQ_MODEL_LABEL_3=Gemma 2 9B
 ```
 
+> **Catatan:** Nama model Groq dapat berubah sewaktu-waktu — selalu periksa daftar terbaru di [console.groq.com/docs/models](https://console.groq.com/docs/models).
+
 > [!IMPORTANT]
 > Pastikan Anda telah mengaktifkan **Message Content Intent** di halaman [Discord Developer Portal](https://discord.com/developers/applications) pada menu **Bot** aplikasi Anda agar bot dapat membaca dan merespons perintah teks.
 
@@ -151,8 +153,7 @@ Jika Anda mengetik `!jarvis` atau `!j` tanpa argumen tambahan, Jarvis akan menam
 | Perintah    | Alias            | Deskripsi                                                       | Contoh Penggunaan                       |
 | :---------- | :--------------- | :-------------------------------------------------------------- | :-------------------------------------- |
 | `ask`       | `chat`, `ai`     | Mengajukan pertanyaan ke Jarvis AI.                             | `!j ask buatkan resep nasi goreng`      |
-| `clearchat` | -                | Menghapus memori riwayat chat Anda dengan bot.                  | `!j clearchat`                          |
-| `search`    | `web`, `cari`    | Mencari jawaban langsung dari web.                              | `!j search harga saham Apple hari ini`  |
+| `search`    | `web`, `cari`    | Menjawab dari pengetahuan model AI, bukan akses web langsung.   | `!j search harga saham Apple hari ini`  |
 | `image`     | `img`, `gambar`  | Membuat gambar AI berdasarkan deskripsi teks.                   | `!j image kucing memakai helm astronot` |
 | `summarize` | `sum`, `ringkas` | Merangkum isi file PDF (wajib lampirkan file atau isi URL PDF). | `!j summarize` _(sambil attach PDF)_    |
 | `remind`    | -                | Menyetel pengingat waktu (`s`/`m`/`h`/`d`).                     | `!j remind 2h rapat kerja`              |

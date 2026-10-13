@@ -9,10 +9,9 @@ import aiohttp
 import discord
 from discord.ext import commands
 from datetime import datetime
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from openai import AsyncOpenAI
-
-# Sapaan tetap untuk seluruh pesan pengguna
-HONORIFIC = "Boss"
+from config import HONORIFIC, TIMEZONE
 
 
 MAX_PDF_CHARS = 12000  
@@ -58,9 +57,9 @@ class AI(commands.Cog):
                 self.models.append((mid, label))
         if not self.models:
             self.models = [
-                ("llama-3.3-70b-versatile", "Llama 3.3 70B"),
-                ("llama-3.1-8b-instant",    "Llama 3.1 8B"),
-                ("gemma2-9b-it",            "Gemma 2 9B"),
+                ("openai/gpt-oss-120b", "GPT-OSS 120B"),
+                ("openai/gpt-oss-20b",  "GPT-OSS 20B"),
+                ("qwen/qwen3.6-27b",    "Qwen3.6 27B"),
             ]
 
         self.custom_image_url = os.getenv("CUSTOM_IMAGE_API_URL")
@@ -70,10 +69,14 @@ class AI(commands.Cog):
     # Helper: system prompt + timestamp
     # ────────────────────────────────────────────────────────────
     def _build_sys(self) -> tuple[str, str]:
-        now_str = datetime.now().strftime('%A, %d %B %Y %H:%M:%S')
+        try:
+            now = datetime.now(ZoneInfo(TIMEZONE))
+        except ZoneInfoNotFoundError:
+            now = datetime.now()
+        now_str = now.strftime('%A, %d %B %Y %H:%M:%S')
         sys_instruction = (
             "You are J.A.R.V.I.S., a refined, unflappable AI butler and chief of staff modeled on the "
-            "assistant from the Iron Man films. Address the user as \"Boss\". "
+            f"assistant from the Iron Man films. Address the user as \"{HONORIFIC}\". "
             "Your voice is calm, composed, and courteous, with dry understated wit used sparingly "
             "(at most one light remark per reply, and never on serious or sensitive topics). "
             "Be proactive: when it helps, offer one concrete next step. "
@@ -81,7 +84,7 @@ class AI(commands.Cog):
             "Use lists only when the user asks for steps. Do not use emoji unless the user uses them. "
             "Accuracy ALWAYS outranks character: never invent facts, system readings, or actions you did not perform. "
             "If something is unknown, say so plainly and in character, "
-            "for example: \"Mohon maaf, Boss, informasi itu di luar jangkauan saya.\" "
+            f"for example: \"Mohon maaf, {HONORIFIC}, informasi itu di luar jangkauan saya.\" "
             f"The current date and time is {now_str}. "
             "Use this date/time context to answer any question about 'now', 'today', or the current year accurately. "
             "Reply in the language the user is speaking (Indonesian or English). "
@@ -188,7 +191,7 @@ class AI(commands.Cog):
 
                 _, sys_instruction = self._build_sys()
                 prompt = (
-                    "Jawablah sebagai J.A.R.V.I.S., asisten yang tenang dan sopan; sapa pengguna dengan \"Boss\".\n"
+                    f"Jawablah sebagai J.A.R.V.I.S., asisten yang tenang dan sopan; sapa pengguna dengan \"{HONORIFIC}\".\n"
                     "Tolong buat ringkasan lengkap dari dokumen PDF berikut ini.\n"
                     "Sertakan: poin-poin utama, kesimpulan, dan informasi penting lainnya.\n"
                     "Gunakan bahasa yang sama dengan dokumen tersebut.\n"
@@ -234,7 +237,7 @@ class AI(commands.Cog):
             try:
                 now_str, sys_instruction = self._build_sys()
                 search_prompt = (
-                    "Kamu adalah J.A.R.V.I.S., asisten yang tenang dan sopan; sapa pengguna dengan \"Boss\". "
+                    f"Kamu adalah J.A.R.V.I.S., asisten yang tenang dan sopan; sapa pengguna dengan \"{HONORIFIC}\". "
                     "Jawabanmu bersumber dari pengetahuan model, BUKAN akses web langsung. "
                     "Berikan jawaban singkat dan relevan untuk pertanyaan berikut. "
                     "Jika informasi berpotensi sudah usang atau bersifat real-time (harga, berita, skor pertandingan), "

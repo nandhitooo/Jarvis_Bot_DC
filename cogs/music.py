@@ -7,9 +7,7 @@ import requests
 from bs4 import BeautifulSoup
 import re
 import threading
-
-# Sapaan tetap untuk seluruh pesan pengguna
-HONORIFIC = "Boss"
+from config import HONORIFIC
 
 # yt-dlp options
 ytdl_format_options = {
@@ -689,7 +687,7 @@ class Music(commands.Cog):
         if vc and (vc.is_playing() or vc.is_paused()) and hasattr(vc.source, 'title'):
             embed.description = f"**Sedang Diputar:**\n🎶 **{vc.source.title}**\n\n"
         else:
-            embed.description = f"**Sedang Diputar:**\n💤 Belum ada lagu yang diputar.\n\n"
+            embed.description = "**Sedang Diputar:**\n💤 Belum ada lagu yang diputar.\n\n"
             
         # Up next
         if not q:
