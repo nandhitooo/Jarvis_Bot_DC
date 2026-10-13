@@ -11,3 +11,4 @@ flask
 fastapi
 uvicorn
 psutil
+pypdf

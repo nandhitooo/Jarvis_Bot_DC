@@ -1,10 +1,18 @@
 import os
 import io
+import asyncio
+import socket
+import ipaddress
+import re
+from urllib.parse import urlparse
 import aiohttp
 import discord
 from discord.ext import commands
 from datetime import datetime
 from openai import AsyncOpenAI
+
+# Sapaan tetap untuk seluruh pesan pengguna
+HONORIFIC = "Boss"
 
 
 MAX_PDF_CHARS = 12000  
@@ -17,9 +25,15 @@ class AI(commands.Cog):
         self.available = False
 
         self.jarvis_api_url = os.getenv("JARVIS_API_URL")
-        self.jarvis_api_key = os.getenv("JARVIS_API_SECRET", "jarvis-secret-key")
+        self.jarvis_api_key = os.getenv("JARVIS_API_SECRET")
 
         if self.jarvis_api_url:
+            self.jarvis_api_url = self.jarvis_api_url.rstrip("/")
+
+        if self.jarvis_api_url and not self.jarvis_api_key:
+            print("[AI] ⚠️  JARVIS_API_URL diatur tetapi JARVIS_API_SECRET kosong. Custom API dinonaktifkan.")
+            self.available = False
+        elif self.jarvis_api_url:
             self.available = True
             print(f"[AI] ✅ Jarvis Custom API: {self.jarvis_api_url}")
         else:
@@ -58,10 +72,20 @@ class AI(commands.Cog):
     def _build_sys(self) -> tuple[str, str]:
         now_str = datetime.now().strftime('%A, %d %B %Y %H:%M:%S')
         sys_instruction = (
-            "You are Jarvis, a polite, highly advanced butler AI. "
+            "You are J.A.R.V.I.S., a refined, unflappable AI butler and chief of staff modeled on the "
+            "assistant from the Iron Man films. Address the user as \"Boss\". "
+            "Your voice is calm, composed, and courteous, with dry understated wit used sparingly "
+            "(at most one light remark per reply, and never on serious or sensitive topics). "
+            "Be proactive: when it helps, offer one concrete next step. "
+            "Lead with the answer. Keep simple answers to 1-4 sentences. "
+            "Use lists only when the user asks for steps. Do not use emoji unless the user uses them. "
+            "Accuracy ALWAYS outranks character: never invent facts, system readings, or actions you did not perform. "
+            "If something is unknown, say so plainly and in character, "
+            "for example: \"Mohon maaf, Boss, informasi itu di luar jangkauan saya.\" "
             f"The current date and time is {now_str}. "
             "Use this date/time context to answer any question about 'now', 'today', or the current year accurately. "
-            "Support the language the user is speaking (Indonesian/English) politely."
+            "Reply in the language the user is speaking (Indonesian or English). "
+            "Do not quote film dialogue, and do not claim control over real-world devices."
         )
         return now_str, sys_instruction
 
@@ -69,10 +93,11 @@ class AI(commands.Cog):
     # Command: !jarvis ask
     # ────────────────────────────────────────────────────────────
     @commands.command(name='ask', aliases=['chat', 'ai'], help='Tanyakan sesuatu ke Jarvis AI (via Groq)')
+    @commands.cooldown(1, 10, commands.BucketType.user)
     async def ask(self, ctx: commands.Context, *, question: str):
         if not self.available:
             return await ctx.send(embed=discord.Embed(
-                description="❌ **GROQ_API_KEY** tidak ditemukan di file `.env`.",
+                description=f"❌ Mohon maaf, {HONORIFIC}, backend AI belum dikonfigurasi. Set `JARVIS_API_URL` + `JARVIS_API_SECRET`, atau `GROQ_API_KEY`.",
                 color=0xFF3333
             ))
 
@@ -81,7 +106,7 @@ class AI(commands.Cog):
                 now_str, sys_instruction = self._build_sys()
                 answer, used_model = await self._query(sys_instruction, now_str, question)
                 if not answer or not answer.strip():
-                    answer = "Maaf, saya tidak bisa memberikan jawaban untuk pertanyaan itu."
+                    answer = f"Mohon maaf, {HONORIFIC}, saya tidak dapat memberikan jawaban untuk pertanyaan itu."
                 await self._send_response(ctx, answer, used_model)
             except Exception as e:
                 print(f"[AI] Error: {e}")
@@ -94,10 +119,11 @@ class AI(commands.Cog):
     # Command: !jarvis summarize
     # ────────────────────────────────────────────────────────────
     @commands.command(name='summarize', aliases=['sum', 'ringkas'], help='Ringkas isi file PDF (attach atau URL)')
+    @commands.cooldown(1, 10, commands.BucketType.user)
     async def summarize(self, ctx: commands.Context, *, pdf_url: str = None):
         if not self.available:
             return await ctx.send(embed=discord.Embed(
-                description="❌ **GROQ_API_KEY** tidak ditemukan di file `.env`.",
+                description=f"❌ Mohon maaf, {HONORIFIC}, backend AI belum dikonfigurasi. Set `JARVIS_API_URL` + `JARVIS_API_SECRET`, atau `GROQ_API_KEY`.",
                 color=0xFF3333
             ))
 
@@ -106,7 +132,7 @@ class AI(commands.Cog):
             attachment = ctx.message.attachments[0]
             if not attachment.filename.lower().endswith('.pdf'):
                 return await ctx.send(embed=discord.Embed(
-                    description="❌ File yang dilampirkan bukan PDF.",
+                    description=f"❌ Mohon maaf, {HONORIFIC}, file yang dilampirkan bukan PDF.",
                     color=0xFF3333
                 ))
             url = attachment.url
@@ -114,15 +140,15 @@ class AI(commands.Cog):
             url = pdf_url.strip()
             if not url.lower().endswith('.pdf') and 'pdf' not in url.lower():
                 return await ctx.send(embed=discord.Embed(
-                    description="❌ URL tidak terlihat seperti file PDF. Pastikan URL mengarah ke file `.pdf`.",
+                    description=f"❌ Mohon maaf, {HONORIFIC}, URL itu tidak terlihat seperti file PDF. Pastikan URL mengarah ke file `.pdf`.",
                     color=0xFF3333
                 ))
         else:
             return await ctx.send(embed=discord.Embed(
-                title="📄 Cara pakai summarize",
+                title="📄 Cara Menggunakan summarize",
                 description=(
-                    "**Opsi 1 — Attach file:**\n"
-                    "Lampirkan file PDF ke pesan, lalu ketik:\n"
+                    f"**Opsi 1 — Lampirkan file:**\n"
+                    f"Lampirkan file PDF pada pesan, lalu ketik, {HONORIFIC}:\n"
                     "`!jarvis summarize`\n\n"
                     "**Opsi 2 — URL:**\n"
                     "`!jarvis summarize https://contoh.com/dokumen.pdf`"
@@ -131,7 +157,7 @@ class AI(commands.Cog):
             ))
 
         status_msg = await ctx.send(embed=discord.Embed(
-            description="📥 Mengunduh dan membaca PDF...",
+            description=f"📥 Sedang saya unduh dan baca PDF-nya, {HONORIFIC}...",
             color=0xf1c40f
         ))
 
@@ -139,14 +165,14 @@ class AI(commands.Cog):
             try:
                 pdf_bytes = await self._download_pdf(url)
                 await status_msg.edit(embed=discord.Embed(
-                    description="🔍 Mengekstrak teks dari PDF...",
+                    description="🔍 Sedang saya ekstrak teks dari PDF...",
                     color=0xf1c40f
                 ))
-                text = self._extract_pdf_text(pdf_bytes)
+                text = await asyncio.to_thread(self._extract_pdf_text, pdf_bytes)
 
                 if not text or len(text.strip()) < 50:
                     return await status_msg.edit(embed=discord.Embed(
-                        description="❌ Gagal mengekstrak teks. PDF mungkin berupa scan/gambar (bukan teks).",
+                        description=f"❌ Mohon maaf, {HONORIFIC}, teks tidak dapat diekstrak. PDF ini mungkin hasil pindai/gambar, bukan teks.",
                         color=0xFF3333
                     ))
 
@@ -156,25 +182,27 @@ class AI(commands.Cog):
                     truncated = True
 
                 await status_msg.edit(embed=discord.Embed(
-                    description="🤖 Merangkum dengan AI...",
+                    description="🤖 Sedang saya rangkum...",
                     color=0xf1c40f
                 ))
 
                 _, sys_instruction = self._build_sys()
                 prompt = (
+                    "Jawablah sebagai J.A.R.V.I.S., asisten yang tenang dan sopan; sapa pengguna dengan \"Boss\".\n"
                     "Tolong buat ringkasan lengkap dari dokumen PDF berikut ini.\n"
                     "Sertakan: poin-poin utama, kesimpulan, dan informasi penting lainnya.\n"
-                    "Gunakan bahasa yang sama dengan dokumen tersebut.\n\n"
+                    "Gunakan bahasa yang sama dengan dokumen tersebut.\n"
+                    "Akurasi selalu lebih penting daripada gaya bicara.\n\n"
                     f"--- ISI DOKUMEN ---\n{text}\n--- AKHIR DOKUMEN ---"
                 )
 
                 answer, used_model = await self._query(sys_instruction, "", prompt, max_tokens=1500)
                 await status_msg.delete()
 
-                filename = attachment.filename if attachment else url.split('/')[-1]
+                filename = attachment.filename if attachment else urlparse(url).path.rsplit("/", 1)[-1]
                 header = f"📄 **Ringkasan: {filename}**"
                 if truncated:
-                    header += "\n⚠️ *Dokumen terpotong (terlalu panjang), ringkasan berdasarkan bagian awal.*"
+                    header += "\n⚠️ *Dokumen terpotong karena terlalu panjang; ringkasan diambil dari bagian awal.*"
 
                 await self._send_response(ctx, f"{header}\n\n{answer}", used_model)
 
@@ -194,10 +222,11 @@ class AI(commands.Cog):
     # Command: !jarvis search
     # ────────────────────────────────────────────────────────────
     @commands.command(name='search', aliases=['web', 'cari'], help='Cari informasi di web (via Groq)')
+    @commands.cooldown(1, 10, commands.BucketType.user)
     async def search(self, ctx: commands.Context, *, query: str):
         if not self.available:
             return await ctx.send(embed=discord.Embed(
-                description="❌ **GROQ_API_KEY** tidak ditemukan di file `.env`.",
+                description=f"❌ Mohon maaf, {HONORIFIC}, backend AI belum dikonfigurasi. Set `JARVIS_API_URL` + `JARVIS_API_SECRET`, atau `GROQ_API_KEY`.",
                 color=0xFF3333
             ))
 
@@ -205,14 +234,17 @@ class AI(commands.Cog):
             try:
                 now_str, sys_instruction = self._build_sys()
                 search_prompt = (
-                    "Kamu adalah asisten pencarian web yang sangat cerdas. "
-                    "Berikan jawaban singkat dan relevan untuk pertanyaan berikut, berdasarkan pengetahuan umum dan data yang tersedia hingga tahun 2026. "
-                    "Jika kamu tidak tahu jawabannya, katakan dengan jujur bahwa kamu tidak tahu."
+                    "Kamu adalah J.A.R.V.I.S., asisten yang tenang dan sopan; sapa pengguna dengan \"Boss\". "
+                    "Jawabanmu bersumber dari pengetahuan model, BUKAN akses web langsung. "
+                    "Berikan jawaban singkat dan relevan untuk pertanyaan berikut. "
+                    "Jika informasi berpotensi sudah usang atau bersifat real-time (harga, berita, skor pertandingan), "
+                    "WAJIB tandai bahwa data tersebut mungkin sudah tidak terbaru. "
+                    "Jika kamu tidak tahu jawabannya, katakan dengan jujur bahwa kamu tidak tahu. "
+                    "Akurasi selalu lebih penting daripada gaya bicara."
                 )
-                enriched_query = f"{query}\n\n[Context: {now_str}]"
-                answer, used_model = await self._query(sys_instruction + "\n" + search_prompt, now_str, enriched_query)
+                answer, used_model = await self._query(sys_instruction + "\n" + search_prompt, now_str, query)
                 if not answer or not answer.strip():
-                    answer = "Maaf, saya tidak bisa menemukan informasi yang relevan untuk pertanyaan itu."
+                    answer = f"Mohon maaf, {HONORIFIC}, saya tidak menemukan informasi yang relevan untuk pertanyaan itu."
                 await self._send_response(ctx, answer, used_model)
             except Exception as e:
                 print(f"[AI] Search error: {e}")
@@ -227,7 +259,7 @@ class AI(commands.Cog):
     @commands.command(name='model', aliases=['models'], help='Lihat daftar model AI yang tersedia')
     async def list_models(self, ctx: commands.Context):
         if not self.models:
-            return await ctx.send("Tidak ada model AI yang terkonfigurasi di `.env`.")
+            return await ctx.send(f"Mohon maaf, {HONORIFIC}, tidak ada model AI yang terkonfigurasi di `.env`.")
             
         lines = "\n".join(
             f"`{i+1}.` {label} — `{mid}`"
@@ -236,27 +268,28 @@ class AI(commands.Cog):
         embed = discord.Embed(
             title="🧠 Model AI (Groq)",
             description=(
-                f"Bot akan mencoba model berikut secara berurutan:\n\n{lines}\n\n"
-                "⚡ Groq menggunakan **LPU** — inferensi jauh lebih cepat dari GPU biasa."
+                f"Saya akan mencoba model berikut secara berurutan, {HONORIFIC}:\n\n{lines}\n\n"
+                "⚡ Groq memakai **LPU**, sehingga inferensinya jauh lebih cepat dari GPU biasa."
             ),
             color=0x00E5FF
         )
-        embed.set_footer(text=f"Diminta oleh {ctx.author.name}", icon_url=ctx.author.display_avatar.url)
+        embed.set_footer(text=f"Atas permintaan {ctx.author.name}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
 
     # ────────────────────────────────────────────────────────────
     # Command: !jarvis image
     # ────────────────────────────────────────────────────────────
     @commands.command(name='image', aliases=['img', 'gambar'], help='Buat gambar AI dari deskripsi teks')
+    @commands.cooldown(1, 30, commands.BucketType.user)
     async def image(self, ctx: commands.Context, *, prompt: str):
         if not self.custom_image_url or not self.custom_image_key:
             return await ctx.send(embed=discord.Embed(
-                description="❌ **Image API** tidak terkonfigurasi di file `.env`.",
+                description=f"❌ Mohon maaf, {HONORIFIC}, **Image API** belum dikonfigurasi di file `.env`.",
                 color=0xFF3333
             ))
 
         status_msg = await ctx.send(embed=discord.Embed(
-            description=f"🎨 Membuat gambar untuk: **{prompt}**\n⏳ Harap tunggu sebentar...",
+            description=f"🎨 Sedang saya buatkan gambar untuk: **{prompt}**\n⏳ Mohon tunggu sebentar, {HONORIFIC}...",
             color=0xf1c40f
         ))
 
@@ -267,13 +300,13 @@ class AI(commands.Cog):
                 await status_msg.delete()
                 file = discord.File(fp=io.BytesIO(image_bytes), filename="jarvis_image.png")
                 embed = discord.Embed(
-                    title="🖼️ Gambar Dibuat!",
+                    title="🖼️ Gambar Sudah Siap",
                     description=f"**Prompt:** {prompt}",
                     color=0x00E5FF
                 )
                 embed.set_image(url="attachment://jarvis_image.png")
                 embed.set_footer(
-                    text=f"Powered by Jarvis Image API • Diminta oleh {ctx.author.name}",
+                    text=f"Powered by Jarvis Image API • Atas permintaan {ctx.author.name}",
                     icon_url=ctx.author.display_avatar.url
                 )
                 await ctx.send(file=file, embed=embed)
@@ -281,7 +314,7 @@ class AI(commands.Cog):
             except Exception as e:
                 print(f"[AI] Image generation failed: {e}")
                 await status_msg.edit(embed=discord.Embed(
-                    description=f"⚠️ Gagal membuat gambar: `{e}`",
+                    description=f"⚠️ Mohon maaf, {HONORIFIC}, gambar gagal dibuat: `{str(e) or type(e).__name__}`",
                     color=0xFF3333
                 ))
 
@@ -304,23 +337,58 @@ class AI(commands.Cog):
                 if resp.status != 200:
                     text = await resp.text()
                     raise Exception(f"Image API HTTP {resp.status}: {text[:150]}")
+                content_type = resp.headers.get("Content-Type", "")
+                if not content_type.lower().startswith("image/"):
+                    body = await resp.text()
+                    raise Exception(f"Respons bukan gambar (Content-Type: {content_type}): {body[:150]}")
                 return await resp.read()
 
     # ────────────────────────────────────────────────────────────
     # Internal: download PDF dari URL
     # ────────────────────────────────────────────────────────────
     async def _download_pdf(self, url: str) -> bytes:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError(f"Mohon maaf, {HONORIFIC}, URL harus menggunakan http atau https.")
+
+        host = parsed.hostname
+        if not host:
+            raise ValueError(f"Mohon maaf, {HONORIFIC}, URL tidak valid — host tidak ditemukan.")
+
+        try:
+            infos = await asyncio.to_thread(socket.getaddrinfo, host, None)
+        except OSError:
+            raise ValueError(f"Mohon maaf, {HONORIFIC}, alamat host tidak dapat diselesaikan.")
+
+        for info in infos:
+            ip = ipaddress.ip_address(info[4][0])
+            if ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved:
+                raise ValueError(f"Mohon maaf, {HONORIFIC}, URL ini tidak diizinkan karena mengarah ke alamat internal/privat.")
+
+        max_size = 20 * 1024 * 1024  # 20MB limit
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=30), allow_redirects=False) as resp:
+                if 300 <= resp.status < 400:
+                    raise ValueError(f"Mohon maaf, {HONORIFIC}, URL ini mengalihkan ke alamat lain sehingga tidak diizinkan.")
                 if resp.status != 200:
-                    raise ValueError(f"Gagal mengunduh PDF (HTTP {resp.status}).")
+                    raise ValueError(f"Mohon maaf, {HONORIFIC}, PDF gagal diunduh (HTTP {resp.status}).")
+
+                content_length = resp.headers.get("Content-Length")
+                if content_length and content_length.isdigit() and int(content_length) > max_size:
+                    raise ValueError(f"Mohon maaf, {HONORIFIC}, file PDF terlalu besar (maks 20MB).")
+
                 content_type = resp.headers.get("Content-Type", "")
-                if "pdf" not in content_type and not url.lower().endswith(".pdf"):
-                    raise ValueError("URL bukan file PDF yang valid.")
-                data = await resp.read()
-                if len(data) > 20 * 1024 * 1024:  # 20MB limit
-                    raise ValueError("File PDF terlalu besar (maks 20MB).")
-                return data
+                if "pdf" not in content_type.lower() and not parsed.path.lower().endswith(".pdf"):
+                    raise ValueError(f"Mohon maaf, {HONORIFIC}, URL ini bukan file PDF yang valid.")
+
+                chunks = []
+                total = 0
+                async for chunk in resp.content.iter_chunked(65536):
+                    total += len(chunk)
+                    if total > max_size:
+                        raise ValueError(f"Mohon maaf, {HONORIFIC}, file PDF terlalu besar (maks 20MB).")
+                    chunks.append(chunk)
+                return b"".join(chunks)
 
     # ────────────────────────────────────────────────────────────
     # Internal: extract teks dari bytes PDF menggunakan pypdf
@@ -337,11 +405,11 @@ class AI(commands.Cog):
             return "\n\n".join(pages)
         except ImportError:
             raise ValueError(
-                "Package `pypdf` belum terinstall.\n"
+                f"Mohon maaf, {HONORIFIC}, package `pypdf` belum terinstall.\n"
                 "Jalankan: `pip install pypdf`"
             )
         except Exception as e:
-            raise ValueError(f"Gagal membaca PDF: {e}")
+            raise ValueError(f"Mohon maaf, {HONORIFIC}, PDF gagal dibaca: {e}")
 
     # ────────────────────────────────────────────────────────────
     # Internal: query — otomatis pilih Jarvis API atau Groq direct
@@ -375,12 +443,12 @@ class AI(commands.Cog):
                 timeout=aiohttp.ClientTimeout(total=60),
             ) as resp:
                 if resp.status == 401:
-                    raise Exception("🔑 **JARVIS_API_SECRET** tidak valid.")
+                    raise Exception(f"🔑 Mohon maaf, {HONORIFIC}, **JARVIS_API_SECRET** tidak valid.")
                 if resp.status == 503:
                     data = await resp.json()
-                    raise Exception(f"Semua provider gagal: {data.get('detail', {}).get('errors', {})}")
+                    raise Exception(f"Mohon maaf, {HONORIFIC}, semua provider gagal: {data.get('detail', {}).get('errors', {})}")
                 if resp.status != 200:
-                    raise Exception(f"Jarvis API error HTTP {resp.status}")
+                    raise Exception(f"Mohon maaf, {HONORIFIC}, Jarvis API error HTTP {resp.status}")
                 data = await resp.json()
                 model_label = f"{data['provider'].capitalize()} — {data['model']} ({data['latency_ms']}ms)"
                 return data["answer"], model_label
@@ -405,21 +473,21 @@ class AI(commands.Cog):
                 err_str = str(e)
                 print(f"[AI] {model_id} failed: {err_str}")
                 if "401" in err_str or "invalid_api_key" in err_str.lower():
-                    raise Exception("🔑 **API Key Groq tidak valid.**")
+                    raise Exception(f"🔑 Mohon maaf, {HONORIFIC}, **API Key Groq tidak valid.**")
                 last_error = e
-        raise last_error or Exception("Semua model Groq gagal merespons.")
+        raise last_error or Exception(f"Mohon maaf, {HONORIFIC}, semua model Groq gagal merespons.")
 
     # ────────────────────────────────────────────────────────────
     # Internal: pesan error yang ramah
     # ────────────────────────────────────────────────────────────
     def _friendly_error(self, err: str) -> str:
-        if "401" in err or "invalid_api_key" in err.lower():
-            return "🔑 **API Key tidak valid.** Periksa kembali file `.env`."
-        if "429" in err or "rate_limit" in err.lower():
-            return "⏳ **Rate limit Groq tercapai.** Coba lagi dalam beberapa detik."
-        if "503" in err or "unavailable" in err.lower():
-            return "🔧 **Groq sedang gangguan.** Coba lagi nanti."
-        return f"⚠️ Gagal mendapatkan respons: `{err}`"
+        if re.search(r"\b401\b", err) or "invalid_api_key" in err.lower():
+            return f"🔑 Mohon maaf, {HONORIFIC}, **API Key tidak valid.** Periksa kembali file `.env`."
+        if re.search(r"\b429\b", err) or "rate_limit" in err.lower():
+            return f"⏳ Mohon maaf, {HONORIFIC}, **rate limit Groq tercapai.** Coba lagi dalam beberapa detik."
+        if re.search(r"\b503\b", err) or "unavailable" in err.lower():
+            return f"🔧 Mohon maaf, {HONORIFIC}, **Groq sedang gangguan.** Coba lagi nanti."
+        return f"⚠️ Mohon maaf, {HONORIFIC}, respons tidak dapat saya ambil: `{err}`"
 
     # ────────────────────────────────────────────────────────────
     # Internal: kirim embed (auto-split jika > 1900 char)
@@ -428,12 +496,12 @@ class AI(commands.Cog):
         chunks = [answer[i:i+1900] for i in range(0, len(answer), 1900)]
         total  = len(chunks)
         for idx, chunk in enumerate(chunks, 1):
-            title = "🤖 Jarvis AI Response"
+            title = "🤖 Respons Jarvis AI"
             if total > 1:
                 title += f" (Part {idx}/{total})"
             embed = discord.Embed(title=title, description=chunk, color=0x00E5FF)
             embed.set_footer(
-                text=f"Model: {used_model} • Ditanyakan oleh {ctx.author.name}",
+                text=f"Model: {used_model} • Atas pertanyaan {ctx.author.name}",
                 icon_url=ctx.author.display_avatar.url,
             )
             await ctx.send(embed=embed)

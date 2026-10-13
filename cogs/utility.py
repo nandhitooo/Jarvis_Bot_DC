@@ -3,6 +3,9 @@ from discord.ext import commands
 import time
 import datetime
 
+# Sapaan tetap untuk seluruh pesan pengguna
+HONORIFIC = "Boss"
+
 class Utility(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -12,7 +15,7 @@ class Utility(commands.Cog):
         ws_latency = round(self.bot.latency * 1000)
 
         start = time.perf_counter()
-        msg = await ctx.send("🏓 Mengukur...")
+        msg = await ctx.send(f"🏓 Mengukur latensi, {HONORIFIC}...")
         roundtrip = round((time.perf_counter() - start) * 1000)
 
         if roundtrip < 100:
@@ -28,38 +31,38 @@ class Utility(commands.Cog):
             color = 0xe74c3c   # merah
             status = "🔴 Lambat"
 
-        embed = discord.Embed(title="🏓 Pong!", color=color)
+        embed = discord.Embed(title="🏓 Semua sistem responsif", color=color)
         embed.add_field(name="📡 WebSocket",  value=f"`{ws_latency}ms`",  inline=True)
         embed.add_field(name="↩️ Round-trip", value=f"`{roundtrip}ms`",   inline=True)
         embed.add_field(name="📊 Status",     value=status,               inline=True)
-        embed.set_footer(text=f"Diminta oleh {ctx.author.name}", icon_url=ctx.author.display_avatar.url)
+        embed.set_footer(text=f"Atas permintaan {ctx.author.name}", icon_url=ctx.author.display_avatar.url)
 
         await msg.edit(content=None, embed=embed)
 
     @commands.command(name='cogs', help='Tampilkan cogs yang sedang aktif')
     async def list_cogs(self, ctx: commands.Context):
-        loaded = ', '.join(self.bot.cogs.keys()) if self.bot.cogs else 'Tidak ada'
+        loaded = ', '.join(self.bot.cogs.keys()) if self.bot.cogs else 'Belum ada'
         embed = discord.Embed(
-            title="📦 Active Modules (Cogs)",
+            title="📦 Modul Aktif (Cogs)",
             description=f"**{loaded}**",
             color=0x00E5FF
         )
-        embed.set_footer(text=f"Diminta oleh {ctx.author.name}", icon_url=ctx.author.display_avatar.url)
+        embed.set_footer(text=f"Atas permintaan {ctx.author.name}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
 
     @commands.command(name='info', help='Lihat info bot')
     async def info(self, ctx: commands.Context):
         embed = discord.Embed(
             title="🤖 Jarvis Bot",
-            description="Bot serbaguna untuk berbagai kebutuhan di server Discord kamu!",
+            description=f"Asisten serbaguna untuk berbagai kebutuhan server Anda, {HONORIFIC}.",
             color=0x00E5FF
         )
         embed.set_thumbnail(url=self.bot.user.display_avatar.url)
         embed.add_field(
             name="✨ Fitur Utama",
             value=(
-                "✅ Responsif dan cepat\n"
-                "✅ Mudah digunakan dengan prefix `!jarvis` / `!j`\n"
+                "✅ Responsif dan sigap\n"
+                "✅ Mudah digunakan lewat prefix `!jarvis` / `!j`\n"
             ),
             inline=False
         )
@@ -80,17 +83,32 @@ class Utility(commands.Cog):
         if hasattr(self.bot, '_send_help_menu'):
             await self.bot._send_help_menu(ctx)
         else:
-            await ctx.send("Menu bantuan tidak tersedia.")
+            await ctx.send(f"Mohon maaf, {HONORIFIC}, menu bantuan sedang tidak tersedia.")
 
     @commands.command(name='invite', help='Dapatkan link invite bot')
     async def invite(self, ctx: commands.Context):
-        invite_link = f"https://discord.com/api/oauth2/authorize?client_id={self.bot.user.id}&permissions=8&scope=bot%20applications.commands"
+        perms = discord.Permissions(
+            view_channel=True,
+            send_messages=True,
+            embed_links=True,
+            attach_files=True,
+            read_message_history=True,
+            connect=True,
+            speak=True,
+            manage_messages=True,
+            kick_members=True,
+            ban_members=True,
+            moderate_members=True,
+            manage_roles=True,
+            manage_channels=True,
+        )
+        invite_link = discord.utils.oauth_url(self.bot.user.id, permissions=perms, scopes=("bot", "applications.commands"))
         embed = discord.Embed(
             title="📨 Invite Jarvis",
-            description=f"Klik [di sini]({invite_link}) untuk mengundang Jarvis ke server kamu!",
+            description=f"Klik [di sini]({invite_link}) untuk mengundang saya ke server Anda, {HONORIFIC}.",
             color=0x00E5FF
         )
-        embed.set_footer(text=f"Diminta oleh {ctx.author.name}", icon_url=ctx.author.display_avatar.url)
+        embed.set_footer(text=f"Atas permintaan {ctx.author.name}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
 
     @commands.command(name='uptime', help='Lihat berapa lama bot sudah online')
@@ -109,30 +127,30 @@ class Utility(commands.Cog):
         if seconds > 0: uptime_str.append(f"{seconds} detik")
 
         embed = discord.Embed(
-            title="🕒 Bot Uptime",
-            description=f"Jarvis sudah aktif selama: **{', '.join(uptime_str) if uptime_str else '0 detik'}**",
+            title="🕒 Waktu Aktif",
+            description=f"Saya sudah aktif selama **{', '.join(uptime_str) if uptime_str else '0 detik'}**, {HONORIFIC}.",
             color=0x00E5FF
         )
-        embed.set_footer(text=f"Online sejak: {self.bot.start_time.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+        embed.set_footer(text=f"Aktif sejak: {self.bot.start_time.strftime('%Y-%m-%d %H:%M:%S UTC')}")
         await ctx.send(embed=embed)
 
     @commands.command(name='stats', help='Statistik penggunaan bot')
     async def stats(self, ctx: commands.Context):
         guild_count = len(self.bot.guilds)
-        user_count = sum(guild.member_count for guild in self.bot.guilds)
+        user_count = sum(guild.member_count or 0 for guild in self.bot.guilds)
         latency = round(self.bot.latency * 1000)
 
         embed = discord.Embed(
-            title="📊 Jarvis Statistics",
+            title="📊 Statistik Jarvis",
             color=0x00E5FF
         )
         embed.add_field(name="🌐 Servers", value=f"`{guild_count}`", inline=True)
         embed.add_field(name="👥 Users", value=f"`{user_count}`", inline=True)
         embed.add_field(name="⚡ Latency", value=f"`{latency}ms`", inline=True)
-        embed.add_field(name="⚙️ Python", value=f"`{discord.__version__}` (discord.py)", inline=False)
+        embed.add_field(name="⚙️ discord.py", value=f"`{discord.__version__}` (discord.py)", inline=False)
         
         embed.set_thumbnail(url=self.bot.user.display_avatar.url)
-        embed.set_footer(text=f"Diminta oleh {ctx.author.name}", icon_url=ctx.author.display_avatar.url)
+        embed.set_footer(text=f"Atas permintaan {ctx.author.name}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
 
     @commands.command(name='userinfo', aliases=['user', 'whois'], help='Lihat informasi user')
@@ -140,23 +158,26 @@ class Utility(commands.Cog):
         member = member or ctx.author
         
         roles = [role.mention for role in member.roles[1:]] # exclude @everyone
+        roles_value = " ".join(roles) if roles else "None"
+        if len(roles_value) > 1024:
+            roles_value = roles_value[:1021] + "..."
         
-        embed = discord.Embed(title=f"👤 User Info — {member.name}", color=member.color)
+        embed = discord.Embed(title=f"👤 Info Pengguna — {member.name}", color=member.color)
         embed.set_thumbnail(url=member.display_avatar.url)
         embed.add_field(name="ID", value=member.id, inline=True)
         embed.add_field(name="Nickname", value=member.nick or "None", inline=True)
         embed.add_field(name="Akun Dibuat", value=member.created_at.strftime("%d %b %Y"), inline=True)
         embed.add_field(name="Join Server", value=member.joined_at.strftime("%d %b %Y") if member.joined_at else "Unknown", inline=True)
-        embed.add_field(name=f"Roles ({len(roles)})", value=" ".join(roles) if roles else "None", inline=False)
+        embed.add_field(name=f"Roles ({len(roles)})", value=roles_value, inline=False)
         
-        embed.set_footer(text=f"Diminta oleh {ctx.author.name}", icon_url=ctx.author.display_avatar.url)
+        embed.set_footer(text=f"Atas permintaan {ctx.author.name}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
 
     @commands.command(name='serverinfo', aliases=['server'], help='Lihat informasi server')
     async def serverinfo(self, ctx: commands.Context):
         guild = ctx.guild
         
-        embed = discord.Embed(title=f"🏰 Server Info — {guild.name}", color=0x00E5FF)
+        embed = discord.Embed(title=f"🏰 Info Server — {guild.name}", color=0x00E5FF)
         if guild.icon:
             embed.set_thumbnail(url=guild.icon.url)
             
@@ -167,7 +188,7 @@ class Utility(commands.Cog):
         embed.add_field(name="Channel", value=f"💬 {len(guild.text_channels)} Text | 🔊 {len(guild.voice_channels)} Voice", inline=True)
         embed.add_field(name="Roles", value=f"🛡️ {len(guild.roles)}", inline=True)
         
-        embed.set_footer(text=f"Diminta oleh {ctx.author.name}", icon_url=ctx.author.display_avatar.url)
+        embed.set_footer(text=f"Atas permintaan {ctx.author.name}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
 
 async def setup(bot):

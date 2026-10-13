@@ -3,6 +3,9 @@ from discord.ext import commands
 import asyncio
 from datetime import timedelta
 
+# Sapaan tetap untuk seluruh pesan pengguna
+HONORIFIC = "Boss"
+
 
 class Moderation(commands.Cog):
     def __init__(self, bot):
@@ -12,13 +15,13 @@ class Moderation(commands.Cog):
     def _can_moderate(self, ctx: commands.Context, target: discord.Member) -> str | None:
         """Return error string jika tidak bisa moderasi, None jika bisa."""
         if target == ctx.author:
-            return "❌ Kamu tidak bisa moderasi diri sendiri."
+            return "❌ Anda tidak dapat memoderasi diri sendiri."
         if target == ctx.guild.owner:
-            return "❌ Tidak bisa moderasi owner server."
+            return "❌ Pemilik server tidak dapat dimoderasi."
         if target.top_role >= ctx.author.top_role and ctx.author != ctx.guild.owner:
-            return "❌ Role kamu tidak cukup tinggi untuk moderasi user ini."
+            return "❌ Role Anda tidak cukup tinggi untuk memoderasi pengguna ini."
         if target.top_role >= ctx.guild.me.top_role:
-            return "❌ Role bot tidak cukup tinggi untuk moderasi user ini."
+            return "❌ Role bot tidak cukup tinggi untuk memoderasi pengguna ini."
         return None
 
     def _mod_embed(self, title: str, desc: str, color: int = 0xFF3333) -> discord.Embed:
@@ -28,6 +31,7 @@ class Moderation(commands.Cog):
     # BAN
     # ────────────────────────────────────────────────────────────
     @commands.command(name='ban', help='Ban user dari server')
+    @commands.guild_only()
     @commands.has_permissions(ban_members=True)
     async def ban(self, ctx: commands.Context, member: discord.Member, *, reason: str = "Tidak ada alasan"):
         err = self._can_moderate(ctx, member)
@@ -43,6 +47,7 @@ class Moderation(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.command(name='unban', help='Unban user dari server')
+    @commands.guild_only()
     @commands.has_permissions(ban_members=True)
     async def unban(self, ctx: commands.Context, *, user_id: int):
         try:
@@ -53,12 +58,13 @@ class Moderation(commands.Cog):
             embed.add_field(name="Oleh", value=ctx.author.mention, inline=False)
             await ctx.send(embed=embed)
         except discord.NotFound:
-            await ctx.send(embed=self._mod_embed("❌ Gagal", "User tidak ditemukan atau tidak dalam daftar ban."))
+            await ctx.send(embed=self._mod_embed("❌ Gagal", "Pengguna tidak ditemukan atau tidak ada dalam daftar ban."))
 
     # ────────────────────────────────────────────────────────────
     # KICK
     # ────────────────────────────────────────────────────────────
     @commands.command(name='kick', help='Kick user dari server')
+    @commands.guild_only()
     @commands.has_permissions(kick_members=True)
     async def kick(self, ctx: commands.Context, member: discord.Member, *, reason: str = "Tidak ada alasan"):
         err = self._can_moderate(ctx, member)
@@ -77,6 +83,7 @@ class Moderation(commands.Cog):
     # TIMEOUT (Mute sementara — built-in Discord)
     # ────────────────────────────────────────────────────────────
     @commands.command(name='timeout', help='Timeout user (menit). Contoh: !jarvis timeout @user 10 spam')
+    @commands.guild_only()
     @commands.has_permissions(moderate_members=True)
     async def timeout(self, ctx: commands.Context, member: discord.Member, durasi: int = 10, *, reason: str = "Tidak ada alasan"):
         err = self._can_moderate(ctx, member)
@@ -99,6 +106,7 @@ class Moderation(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.command(name='untimeout', help='Hapus timeout user')
+    @commands.guild_only()
     @commands.has_permissions(moderate_members=True)
     async def untimeout(self, ctx: commands.Context, member: discord.Member):
         await member.timeout(None)
@@ -111,6 +119,7 @@ class Moderation(commands.Cog):
     # PURGE (hapus banyak pesan sekaligus)
     # ────────────────────────────────────────────────────────────
     @commands.command(name='purge', aliases=['clear'], help='Hapus pesan. Contoh: !jarvis purge 10')
+    @commands.guild_only()
     @commands.has_permissions(manage_messages=True)
     async def purge(self, ctx: commands.Context, jumlah: int, member: discord.Member = None):
         if jumlah < 1 or jumlah > 100:
@@ -119,14 +128,22 @@ class Moderation(commands.Cog):
         await ctx.message.delete()
 
         if member:
-            def check(m): return m.author == member
-            deleted = await ctx.channel.purge(limit=jumlah * 3, check=check, bulk=True)
-            deleted = deleted[:jumlah]
+            to_delete = []
+            cutoff = discord.utils.utcnow() - timedelta(days=14)
+            async for m in ctx.channel.history(limit=jumlah * 10, before=ctx.message):
+                if m.author == member and m.created_at > cutoff:
+                    to_delete.append(m)
+                    if len(to_delete) >= jumlah:
+                        break
+            if to_delete:
+                await ctx.channel.delete_messages(to_delete)
+            deleted_count = len(to_delete)
         else:
             deleted = await ctx.channel.purge(limit=jumlah, bulk=True)
+            deleted_count = len(deleted)
 
         msg = await ctx.send(embed=discord.Embed(
-            description=f"🗑️ **{len(deleted)} pesan** dihapus oleh {ctx.author.mention}.",
+            description=f"🗑️ **{deleted_count} pesan** telah dihapus oleh {ctx.author.mention}.",
             color=0x2ecc71
         ))
         await asyncio.sleep(4)
@@ -136,6 +153,7 @@ class Moderation(commands.Cog):
     # WARN (simpan di memory, reset saat bot restart)
     # ────────────────────────────────────────────────────────────
     @commands.command(name='warn', help='Beri peringatan ke user')
+    @commands.guild_only()
     @commands.has_permissions(kick_members=True)
     async def warn(self, ctx: commands.Context, member: discord.Member, *, reason: str = "Tidak ada alasan"):
         err = self._can_moderate(ctx, member)
@@ -159,27 +177,29 @@ class Moderation(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.command(name='warnings', aliases=['warnlist'], help='Lihat daftar warning user')
+    @commands.guild_only()
     @commands.has_permissions(kick_members=True)
     async def warnings(self, ctx: commands.Context, member: discord.Member):
         warnings = getattr(self.bot, '_warnings', {}).get((ctx.guild.id, member.id), [])
         if not warnings:
             return await ctx.send(embed=discord.Embed(
-                description=f"✅ {member.mention} tidak memiliki warning.",
+                description=f"✅ {member.mention} tidak memiliki peringatan.",
                 color=0x2ecc71
             ))
-        embed = discord.Embed(title=f"⚠️ Warnings — {member.name}", color=0xF1C40F)
+        embed = discord.Embed(title=f"⚠️ Peringatan — {member.name}", color=0xF1C40F)
         for i, w in enumerate(warnings, 1):
             embed.add_field(name=f"#{i}", value=f"**Alasan:** {w['reason']}\n**Oleh:** {w['by']}", inline=False)
         embed.set_thumbnail(url=member.display_avatar.url)
         await ctx.send(embed=embed)
 
     @commands.command(name='clearwarns', help='Hapus semua warning user')
+    @commands.guild_only()
     @commands.has_permissions(administrator=True)
     async def clearwarns(self, ctx: commands.Context, member: discord.Member):
         if hasattr(self.bot, '_warnings'):
             self.bot._warnings.pop((ctx.guild.id, member.id), None)
         await ctx.send(embed=discord.Embed(
-            description=f"✅ Semua warning {member.mention} telah dihapus.",
+            description=f"✅ Semua peringatan {member.mention} telah dihapus.",
             color=0x2ecc71
         ))
 
@@ -187,18 +207,20 @@ class Moderation(commands.Cog):
     # SLOWMODE
     # ────────────────────────────────────────────────────────────
     @commands.command(name='slowmode', help='Set slowmode channel (detik). 0 untuk matikan.')
+    @commands.guild_only()
     @commands.has_permissions(manage_channels=True)
     async def slowmode(self, ctx: commands.Context, detik: int):
         if detik < 0 or detik > 21600:
             return await ctx.send(embed=self._mod_embed("❌ Gagal", "Slowmode harus antara 0–21600 detik."))
         await ctx.channel.edit(slowmode_delay=detik)
-        msg = f"✅ Slowmode **dimatikan**." if detik == 0 else f"✅ Slowmode diset ke **{detik} detik**."
+        msg = f"✅ Slowmode **dimatikan**." if detik == 0 else f"✅ Slowmode diatur ke **{detik} detik**."
         await ctx.send(embed=discord.Embed(description=msg, color=0x2ecc71))
 
     # ────────────────────────────────────────────────────────────
     # LOCK / UNLOCK channel
     # ────────────────────────────────────────────────────────────
     @commands.command(name='lock', help='Kunci channel agar member tidak bisa mengirim pesan')
+    @commands.guild_only()
     @commands.has_permissions(manage_channels=True)
     async def lock(self, ctx: commands.Context):
         overwrite = ctx.channel.overwrites_for(ctx.guild.default_role)
@@ -210,10 +232,11 @@ class Moderation(commands.Cog):
         ))
 
     @commands.command(name='unlock', help='Buka kunci channel')
+    @commands.guild_only()
     @commands.has_permissions(manage_channels=True)
     async def unlock(self, ctx: commands.Context):
         overwrite = ctx.channel.overwrites_for(ctx.guild.default_role)
-        overwrite.send_messages = True
+        overwrite.send_messages = None
         await ctx.channel.set_permissions(ctx.guild.default_role, overwrite=overwrite)
         await ctx.send(embed=discord.Embed(
             description=f"🔓 Channel **{ctx.channel.name}** dibuka oleh {ctx.author.mention}.",
@@ -221,6 +244,7 @@ class Moderation(commands.Cog):
         ))
 
     @commands.command(name='mute', help='Mute user')
+    @commands.guild_only()
     @commands.has_permissions(manage_roles=True)
     async def mute(self, ctx: commands.Context, member: discord.Member, *, reason: str = "Tidak ada alasan"):
         err = self._can_moderate(ctx, member)
@@ -242,6 +266,7 @@ class Moderation(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.command(name='unmute', help='Unmute user')
+    @commands.guild_only()
     @commands.has_permissions(manage_roles=True)
     async def unmute(self, ctx: commands.Context, member: discord.Member):
         muted_role = discord.utils.get(ctx.guild.roles, name="Muted")
@@ -252,7 +277,7 @@ class Moderation(commands.Cog):
             embed.add_field(name="Oleh", value=ctx.author.mention, inline=False)
             await ctx.send(embed=embed)
         else:
-            await ctx.send(embed=self._mod_embed("❌ Gagal", "User ini tidak sedang dimute."))
+            await ctx.send(embed=self._mod_embed("❌ Gagal", "Pengguna ini tidak sedang dimute."))
 
     # ────────────────────────────────────────────────────────────
     # ERROR HANDLER — permission errors
@@ -269,24 +294,38 @@ class Moderation(commands.Cog):
     @lock.error
     @unlock.error
     @unban.error
+    @mute.error
+    @unmute.error
     async def mod_error(self, ctx: commands.Context, error):
+        original = error.original if isinstance(error, commands.CommandInvokeError) else error
+
         if isinstance(error, commands.MissingPermissions):
             await ctx.send(embed=self._mod_embed(
                 "❌ Akses Ditolak",
                 f"Kamu tidak memiliki permission: `{'`, `'.join(error.missing_permissions)}`"
+            ))
+        elif isinstance(original, commands.BotMissingPermissions):
+            await ctx.send(embed=self._mod_embed(
+                "❌ Bot Kurang Permission",
+                f"Bot tidak punya permission: `{'`, `'.join(original.missing_permissions)}`"
+            ))
+        elif isinstance(original, discord.Forbidden):
+            await ctx.send(embed=self._mod_embed(
+                "❌ Akses Ditolak",
+                "Bot tidak memiliki izin untuk melakukan aksi ini. Pastikan posisi role bot berada di atas target."
             ))
         elif isinstance(error, commands.MemberNotFound):
             await ctx.send(embed=self._mod_embed("❌ Gagal", "Member tidak ditemukan."))
         elif isinstance(error, commands.MissingRequiredArgument):
             await ctx.send(embed=self._mod_embed(
                 "❌ Argumen Kurang",
-                f"Argumen `{error.param.name}` diperlukan. Ketik `!jarvis` untuk bantuan."
+                f"Mohon maaf, {HONORIFIC}, argumen `{error.param.name}` masih diperlukan. Ketik `!jarvis` untuk bantuan."
             ))
         elif isinstance(error, commands.BadArgument):
             await ctx.send(embed=self._mod_embed("❌ Argumen Salah", "Pastikan format perintah sudah benar."))
         else:
             print(f"[Mod] Error: {error}")
-            await ctx.send(embed=self._mod_embed("⚠️ Error", f"`{error}`"))
+            await ctx.send(embed=self._mod_embed("⚠️ Error", f"Terjadi kesalahan saat menjalankan perintah. Silakan coba lagi, {HONORIFIC}."))
 
 
 async def setup(bot):

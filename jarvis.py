@@ -8,6 +8,9 @@ import datetime
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 
+# Sapaan tetap untuk seluruh pesan pengguna
+HONORIFIC = "Boss"
+
 class Jarvis(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
@@ -39,8 +42,9 @@ class Jarvis(commands.Bot):
         # Load opus library dari folder lib
         if not discord.opus.is_loaded():
             try:
-                discord.opus.load_opus('./lib/libopus.dll')
-                print("[Jarvis] Opus library loaded successfully from ./lib/libopus.dll")
+                opus_path = './lib/libopus.dll' if os.name == 'nt' else 'libopus.so.0'
+                discord.opus.load_opus(opus_path)
+                print(f"[Jarvis] Opus library loaded successfully from {opus_path}")
             except Exception as e:
                 print(f"[Jarvis] Gagal load Opus: {e}")
 
@@ -58,7 +62,7 @@ class Jarvis(commands.Bot):
         )
  
     async def on_message(self, message: discord.Message):
-        if message.author == self.user:
+        if message.author.bot:
             return
  
         # Tampilkan menu jika hanya mengetik "!jarvis" atau "!j" tanpa sub-command
@@ -72,6 +76,67 @@ class Jarvis(commands.Bot):
     async def _send_help_menu(self, ctx: commands.Context):
         view = HelpView(ctx, self)
         await view.send_initial_help()
+
+    async def on_command_error(self, ctx: commands.Context, error):
+        if ctx.command and ctx.command.has_error_handler():
+            return
+        if ctx.cog and ctx.cog.has_error_handler():
+            return
+        if isinstance(error, commands.CommandNotFound):
+            return  # Abaikan perintah yang tidak dikenal
+        if isinstance(error, commands.MissingRequiredArgument):
+            embed = discord.Embed(
+                title="❌ Argumen Kurang",
+                description=f"Mohon maaf, {HONORIFIC}, parameter **`{error.param.name}`** masih dibutuhkan. Ketik `!jarvis` untuk melihat daftar perintah.",
+                color=0xff3333
+            )
+            await ctx.send(embed=embed)
+            return
+        if isinstance(error, commands.BadArgument):
+            embed = discord.Embed(
+                title="❌ Format Tidak Valid",
+                description=f"Mohon maaf, {HONORIFIC}, argumen yang diberikan tidak sesuai format. Ketik `!jarvis` untuk melihat contoh penggunaan.",
+                color=0xff3333
+            )
+            await ctx.send(embed=embed)
+            return
+        if isinstance(error, commands.CommandOnCooldown):
+            embed = discord.Embed(
+                title="⏳ Tunggu Sebentar",
+                description=f"Mohon bersabar, {HONORIFIC} — tunggu {error.retry_after:.0f} detik.",
+                color=0xf1c40f
+            )
+            await ctx.send(embed=embed)
+            return
+        if isinstance(error, commands.NoPrivateMessage):
+            embed = discord.Embed(
+                title="❌ Hanya di Server",
+                description="Perintah ini hanya dapat dijalankan di dalam server.",
+                color=0xff3333
+            )
+            await ctx.send(embed=embed)
+            return
+
+        if isinstance(error, (commands.NotOwner, commands.CheckFailure)):
+            embed = discord.Embed(
+                title="❌ Akses Ditolak",
+                description=f"Mohon maaf, {HONORIFIC}, Anda tidak memiliki izin untuk perintah ini.",
+                color=0xff3333
+            )
+            await ctx.send(embed=embed)
+            return
+
+        # Log error teknis tanpa expose detail ke user
+        if isinstance(error, commands.CommandInvokeError):
+            print(f"[Error] Command '{ctx.command}': {error.original}")
+        else:
+            print(f"[Error] Command '{ctx.command}': {error}")
+        embed = discord.Embed(
+            title="⚠️ Terjadi Kesalahan",
+            description=f"Ada yang berjalan tidak semestinya, {HONORIFIC}. Silakan coba lagi.",
+            color=0xf1c40f
+        )
+        await ctx.send(embed=embed)
 
 class HelpView(discord.ui.View):
     def __init__(self, ctx: commands.Context, bot: commands.Bot):
@@ -89,9 +154,9 @@ class HelpView(discord.ui.View):
         embed = discord.Embed(
             title="",
             description=(
-                f"### 🤖 Jarvis — Personal AI Assistant\n"
-                f"Siap melayani, **{self.ctx.author.display_name}**. Pukul {now} — ada yang bisa saya bantu?\n\n"
-                "Silakan pilih kategori di bawah untuk melihat daftar perintah."
+                f"### 🤖 Jarvis — Asisten AI Pribadi\n"
+                f"Dengan senang hati, **{self.ctx.author.display_name}**. Sekarang pukul {now} — ada yang bisa saya bantu?\n\n"
+                f"Silakan pilih kategori di bawah ini, {HONORIFIC}."
             ),
             color=0x00E5FF,
         )
@@ -99,30 +164,30 @@ class HelpView(discord.ui.View):
             embed.set_author(name="Jarvis Bot", icon_url=self.bot.user.display_avatar.url)
             embed.set_thumbnail(url=self.bot.user.display_avatar.url)
         
-        embed.add_field(name="🎵 Musik", value="Kontrol playback & antrian lagu", inline=True)
-        embed.add_field(name="🤖 AI & Asisten", value="Tanya AI, Ringkas PDF, Search", inline=True)
-        embed.add_field(name="⚙️ Moderator", value="Kelola member & channel", inline=True)
-        embed.add_field(name="🛠️ Utilitas", value="Info bot, stats, uptime", inline=True)
+        embed.add_field(name="🎵 Musik", value="Kontrol pemutaran & antrian lagu", inline=True)
+        embed.add_field(name="🤖 AI & Asisten", value="Tanya AI, ringkas PDF, pencarian", inline=True)
+        embed.add_field(name="⚙️ Moderator", value="Kelola anggota & channel", inline=True)
+        embed.add_field(name="🛠️ Utilitas", value="Info bot, statistik, waktu aktif", inline=True)
         
         embed.set_footer(
-            text=f"Jarvis v2.5  •  Pilih menu di bawah",
+            text=f"Jarvis v2.5  •  Silakan pilih menu di bawah",
             icon_url=self.ctx.author.display_avatar.url
         )
         return embed
 
     @discord.ui.select(
-        placeholder="Pilih Kategori Perintah...",
+        placeholder="Silakan pilih kategori perintah...",
         options=[
             discord.SelectOption(label="Menu Utama", value="Main", emoji="🏠", description="Kembali ke halaman utama"),
-            discord.SelectOption(label="Musik", value="Music", emoji="🎵", description="Perintah untuk memutar musik"),
+            discord.SelectOption(label="Musik", value="Music", emoji="🎵", description="Perintah pemutaran musik"),
             discord.SelectOption(label="AI & Asisten", value="AI", emoji="🤖", description="Fitur kecerdasan buatan"),
-            discord.SelectOption(label="Moderator", value="Mod", emoji="⚙️", description="Perintah manajemen server"),
+            discord.SelectOption(label="Moderator", value="Mod", emoji="⚙️", description="Perintah moderasi server"),
             discord.SelectOption(label="Utilitas", value="Util", emoji="🛠️", description="Informasi dan alat bantu"),
         ]
     )
     async def select_callback(self, interaction: discord.Interaction, select: discord.ui.Select):
         if interaction.user.id != self.ctx.author.id:
-            return await interaction.response.send_message("Hanya orang yang memanggil menu ini yang bisa menggunakannya, Boss.", ephemeral=True)
+            return await interaction.response.send_message(f"Mohon maaf, hanya pemanggil menu ini yang dapat menggunakannya, {HONORIFIC}.", ephemeral=True)
         
         self.current_category = select.values[0]
         embed = None
@@ -145,8 +210,8 @@ class HelpView(discord.ui.View):
         embed.add_field(
             name="Kontrol Dasar",
             value=(
-                "`!j join` — Masuk ke voice channel\n"
-                "`!j play <link/judul>` — Putar lagu\n"
+                "`!j join` — Bergabung ke voice channel\n"
+                "`!j play <tautan/judul>` — Putar lagu\n"
                 "`!j stop` — Berhenti & keluar\n"
                 "`!j pause` / `!j resume` — Jeda/Lanjut\n"
                 "`!j skip` — Lewati lagu\n"
@@ -156,9 +221,9 @@ class HelpView(discord.ui.View):
             name="Antrian & Info",
             value=(
                 "`!j queue` — Lihat daftar putar\n"
-                "`!j np` — Lagu sekarang\n"
-                "`!j ph` — Riwayat putar\n"
-                "`!j clear` — Hapus antrian\n"
+                "`!j np` — Lagu yang sedang diputar\n"
+                "`!j ph` — Riwayat pemutaran\n"
+                "`!j clearqueue` (alias `cq`) — Hapus antrian\n"
                 "`!j remove <no>` — Hapus lagu tertentu\n"
                 "`!j volume <0-100>` — Atur volume\n"
             ), inline=False
@@ -170,9 +235,8 @@ class HelpView(discord.ui.View):
         embed.add_field(
             name="Kecerdasan Buatan",
             value=(
-                "`!j ask <tanya>` — Ngobrol dengan Jarvis\n"
-                "`!j clearchat` — Hapus memori chat\n"
-                "`!j search <query>` — Cari info di web\n"
+                "`!j ask <tanya>` — Bercakap dengan Jarvis\n"
+                "`!j search <query>` — Cari informasi\n"
                 "`!j image <deskripsi>` — Generate gambar AI\n"
                 "`!j summarize <pdf>` — Ringkas dokumen\n"
             ), inline=False
@@ -183,7 +247,7 @@ class HelpView(discord.ui.View):
                 "`!j remind <waktu> <tugas>` — Setel pengingat\n"
                 "`!j timer <waktu>` — Setel timer\n"
                 "`!j weather <kota>` — Cek cuaca\n"
-                "`!j calc <ekspresi>` — Kalkulator mat\n"
+                "`!j calc <ekspresi>` — Kalkulator matematika\n"
                 "`!j sysinfo` — Cek status sistem host\n"
                 "`!j model` — Lihat model yang aktif\n"
             ), inline=False
@@ -230,35 +294,6 @@ class HelpView(discord.ui.View):
             ), inline=True
         )
         return embed
-
-    async def on_command_error(self, ctx: commands.Context, error):
-        if isinstance(error, commands.CommandNotFound):
-            return  # Abaikan perintah yang tidak dikenal
-        if isinstance(error, commands.MissingRequiredArgument):
-            embed = discord.Embed(
-                title="❌ Argumen Kurang",
-                description=f"Parameter **`{error.param.name}`** diperlukan. > Ketik `!jarvis` untuk melihat daftar perintah.",
-                color=0xff3333
-            )
-            await ctx.send(embed=embed)
-            return
-        if isinstance(error, commands.BadArgument):
-            embed = discord.Embed(
-                title="❌ Format Tidak Valid",
-                description="Argumen yang diberikan tidak sesuai format. > Ketik `!jarvis` untuk melihat contoh penggunaan.",
-                color=0xff3333
-            )
-            await ctx.send(embed=embed)
-            return
-
-        # Log error teknis tanpa expose detail ke user
-        print(f"[Error] Command '{ctx.command}': {error}")
-        embed = discord.Embed(
-            title="⚠️ Terjadi Kesalahan",
-            description="Sesuatu berjalan tidak semestinya, Boss. Silakan coba lagi.",
-            color=0xf1c40f
-        )
-        await ctx.send(embed=embed)
 
     async def close(self):
         """Graceful shutdown: disconnect semua voice client."""
