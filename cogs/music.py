@@ -1,6 +1,7 @@
 """Music cog: voice playback, queue management, and playback history."""
 
 import asyncio
+import os
 import re
 import threading
 from collections import deque
@@ -35,6 +36,15 @@ ytdl_format_options = {
     'source_address': '0.0.0.0',
     'socket_timeout': 30,
 }
+
+# YouTube blokir IP datacenter -> pakai cookies kalau file-nya ada.
+# Taruh cookies.txt (format Netscape) di root folder bot, sejajar main file.
+COOKIES_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'cookies.txt')
+if os.path.isfile(COOKIES_PATH):
+    ytdl_format_options['cookiefile'] = COOKIES_PATH
+    print(f"[yt-dlp] Pakai cookies: {COOKIES_PATH}")
+else:
+    print("[yt-dlp] cookies.txt tidak ditemukan, jalan tanpa cookies.")
 
 ffmpeg_options = {
     'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
@@ -762,4 +772,3 @@ class Music(commands.Cog):
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Music(bot))
-    
