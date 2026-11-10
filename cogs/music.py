@@ -35,6 +35,9 @@ ytdl_format_options = {
     'extract_flat': 'in_playlist',
     'source_address': '0.0.0.0',
     'socket_timeout': 30,
+    # YouTube sekarang butuh JS runtime (deno/node) buat solve challenge,
+    # kalau tidak, format audio tidak muncul ("Requested format is not available").
+    'js_runtimes': {'deno': {}, 'node': {}},
 }
 
 # YouTube blokir IP datacenter -> pakai cookies kalau file-nya ada.
@@ -772,3 +775,4 @@ class Music(commands.Cog):
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Music(bot))
+    
